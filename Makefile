@@ -20,11 +20,12 @@ ui-user:
 clean:
 	rm -rf ui/admin/build
 	rm -rf ui/user/build
+	rm -rf bin
+	rm -f otto8.db
 
 # Build the project
 build:
 	go build -ldflags="-s -w" -o bin/otto8 .
-
 
 dev:
 	./tools/dev.sh $(ARGS)
@@ -44,6 +45,12 @@ package-tools:
 	./tools/package-tools.sh
 
 in-docker-build: all package-tools
+
+dev-image: clean
+	docker build -t otto8:dev .
+
+dev-container: dev-image
+	docker run -e OPENAI_API_KEY -p 8080:8080 otto8:dev
 
 no-changes:
 	@if [ -n "$$(git status --porcelain)" ]; then \
