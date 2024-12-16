@@ -57,6 +57,18 @@ export function OAuthAppTile({
                                 organization.
                             </TooltipContent>
                         </Tooltip>
+                    ) : info.noGatewayIntegration ? (
+                        <Tooltip>
+                            <TooltipTrigger>
+                                <Badge variant="secondary">
+                                    Not Configured
+                                </Badge>
+                            </TooltipTrigger>
+
+                            <TooltipContent>
+                                OAuth for {displayName} is not configured
+                            </TooltipContent>
+                        </Tooltip>
                     ) : (
                         <Tooltip>
                             <TooltipTrigger>
@@ -73,18 +85,6 @@ export function OAuthAppTile({
 
                 <OAuthAppDetail type={type} />
             </CardHeader>
-
-            <CardContent className="flex-grow flex items-center justify-center">
-                <div className="h-[100px] flex justify-center items-center overflow-clip">
-                    <img
-                        src={getSrc()}
-                        alt={displayName}
-                        className={cn("max-w-full max-h-[100px] aspect-auto", {
-                            "dark:invert": info.invertDark,
-                        })}
-                    />
-                </div>
-            </CardContent>
         </Card>
     );
 }

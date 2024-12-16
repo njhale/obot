@@ -124,6 +124,7 @@ function EmptyContent({
     spec: OAuthAppSpec;
     onSuccess: () => void;
 }) {
+    //
     return (
         <div className="flex flex-col gap-2">
             <TypographyP>
