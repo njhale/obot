@@ -2126,74 +2126,86 @@ func schema_acorn_io_acorn_apiclient_types_OAuthAppManifest(ref common.Reference
 					},
 					"type": {
 						SchemaProps: spec.SchemaProps{
-							Default: "",
-							Type:    []string{"string"},
-							Format:  "",
+							Description: "Type discriminates between OAuth apps and determines any platform specific differences in the OAuth flow executed for the OAuth app. It's required for all OAuth apps.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 					"name": {
 						SchemaProps: spec.SchemaProps{
-							Type:   []string{"string"},
-							Format: "",
+							Description: "Name is the name of OAuth app.",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 					"clientID": {
 						SchemaProps: spec.SchemaProps{
-							Default: "",
-							Type:    []string{"string"},
-							Format:  "",
+							Description: "ClientID is the client ID used for the OAuth app flow. It's required for all OAuthAppTypes.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 					"clientSecret": {
 						SchemaProps: spec.SchemaProps{
-							Type:   []string{"string"},
-							Format: "",
+							Description: "ClientSecret is the client secret used for the OAuth flow. It's required for all OAuthAppTypes.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"appBaseURL": {
+						SchemaProps: spec.SchemaProps{
+							Description: "BaseURL is the base URL of the app to integrate with. It's required for ServiceNow OAuth apps.",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 					"authURL": {
 						SchemaProps: spec.SchemaProps{
-							Description: "These fields are only needed for custom OAuth apps.",
+							Description: "AuthURL is the URL used to kick off the OAuth flow for the OAuth app. It's required for custom OAuth apps. Well-known defaults are used for all other OAuthAppTypes.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"tokenURL": {
 						SchemaProps: spec.SchemaProps{
-							Type:   []string{"string"},
-							Format: "",
+							Description: "TokenURL is the URL used to request authorization tokens for the OAuth app. It's required for custom OAuth apps. Well-known defaults are used for all other OAuthAppTypes.",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 					"tenantID": {
 						SchemaProps: spec.SchemaProps{
-							Description: "This field is only needed for Microsoft 365 OAuth apps.",
+							Description: "TenantID is the ID of the Microsoft 365 tenant. It's required for Microsoft 365 OAuth apps.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"appID": {
 						SchemaProps: spec.SchemaProps{
-							Description: "This field is only needed for HubSpot OAuth apps.",
+							Description: "AppID is the ID of the HubSpot OAuth app. It's required for HubSpot OAuth apps.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"optionalScope": {
 						SchemaProps: spec.SchemaProps{
-							Description: "This field is optional for HubSpot OAuth apps.",
+							Description: "OptionalScope is a set of optional scopes used for HubSpot OAuth apps.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"integration": {
 						SchemaProps: spec.SchemaProps{
-							Description: "This field is required, it correlates to the integration name in the gptscript oauth cred tool",
+							Description: "Integration correlates the OAuth app to an integration name in the Otto8 OAuth 2.0 cred tool. It's required for all OAuthAppTypes.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"global": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Global indicates if the OAuth app is globally applied to all agents.",
+							Description: "Global indicates if the OAuth app is globally applied to all agents. It's optional and defaults to true.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
