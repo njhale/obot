@@ -53,20 +53,20 @@ type (
 )
 
 type Config struct {
-	HTTPListenPort             int    `usage:"HTTP port to listen on" default:"8080" name:"http-listen-port"`
-	DevMode                    bool   `usage:"Enable development mode" default:"false" name:"dev-mode" env:"OBOT_DEV_MODE"`
-	DevUIPort                  int    `usage:"The port on localhost running the dev instance of the UI" default:"5173"`
-	AllowedOrigin              string `usage:"Allowed origin for CORS"`
-	ToolRegistry               string `usage:"The tool reference for the tool registry" default:"github.com/obot-platform/tools"`
-	WorkspaceProviderType      string `usage:"The type of workspace provider to use for non-knowledge workspaces" default:"directory" env:"OBOT_WORKSPACE_PROVIDER_TYPE"`
-	WorkspaceTool              string `usage:"The tool reference for the workspace provider" default:"github.com/gptscript-ai/workspace-provider"`
-	DatasetsTool               string `usage:"The tool reference for the dataset provider" default:"github.com/gptscript-ai/datasets"`
-	HelperModel                string `usage:"The model used to generate names and descriptions" default:"gpt-4o-mini"`
-	AWSKMSKeyARN               string `usage:"The ARN of the AWS KMS key to use for encrypting credential storage" env:"OBOT_AWS_KMS_KEY_ARN" name:"aws-kms-key-arn"`
-	EncryptionConfigFile       string `usage:"The path to the encryption configuration file" default:"./encryption.yaml"`
-	KnowledgeSetIngestionLimit int    `usage:"The maximum number of files to ingest into a knowledge set" default:"3000" env:"OBOT_KNOWLEDGESET_INGESTION_LIMIT" name:"knowledge-set-ingestion-limit"`
-	EmailServerName            string `usage:"The name of the email server to display for email receivers"`
-	Docker                     bool   `usage:"Enable Docker support" default:"false" env:"OBOT_DOCKER"`
+	HTTPListenPort             int      `usage:"HTTP port to listen on" default:"8080" name:"http-listen-port"`
+	DevMode                    bool     `usage:"Enable development mode" default:"false" name:"dev-mode" env:"OBOT_DEV_MODE"`
+	DevUIPort                  int      `usage:"The port on localhost running the dev instance of the UI" default:"5173"`
+	AllowedOrigin              string   `usage:"Allowed origin for CORS"`
+	ToolRegistries             []string `usage:"The references for the set of tool registries to use" default:"github.com/obot-platform/tools"`
+	WorkspaceProviderType      string   `usage:"The type of workspace provider to use for non-knowledge workspaces" default:"directory" env:"OBOT_WORKSPACE_PROVIDER_TYPE"`
+	WorkspaceTool              string   `usage:"The tool reference for the workspace provider" default:"github.com/gptscript-ai/workspace-provider"`
+	DatasetsTool               string   `usage:"The tool reference for the dataset provider" default:"github.com/gptscript-ai/datasets"`
+	HelperModel                string   `usage:"The model used to generate names and descriptions" default:"gpt-4o-mini"`
+	AWSKMSKeyARN               string   `usage:"The ARN of the AWS KMS key to use for encrypting credential storage" env:"OBOT_AWS_KMS_KEY_ARN" name:"aws-kms-key-arn"`
+	EncryptionConfigFile       string   `usage:"The path to the encryption configuration file" default:"./encryption.yaml"`
+	KnowledgeSetIngestionLimit int      `usage:"The maximum number of files to ingest into a knowledge set" default:"3000" env:"OBOT_KNOWLEDGESET_INGESTION_LIMIT" name:"knowledge-set-ingestion-limit"`
+	EmailServerName            string   `usage:"The name of the email server to display for email receivers"`
+	Docker                     bool     `usage:"Enable Docker support" default:"false" env:"OBOT_DOCKER"`
 
 	AuthConfig
 	GatewayConfig
@@ -74,7 +74,7 @@ type Config struct {
 }
 
 type Services struct {
-	ToolRegistryURL            string
+	ToolRegistryURLs           []string
 	WorkspaceProviderType      string
 	ServerURL                  string
 	EmailServerName            string
@@ -96,17 +96,14 @@ type Services struct {
 	SupportDocker              bool
 }
 
-const (
-	defaultDatasetsTool  = "github.com/gptscript-ai/datasets"
-	defaultToolsRegistry = "github.com/obot-platform/tools"
-)
+const defaultDatasetsTool = "github.com/gptscript-ai/datasets"
 
-func newGPTScript(ctx context.Context, workspaceTool, datasetsTool, toolsRegistry string) (*gptscript.GPTScript, error) {
+func newGPTScript(ctx context.Context, workspaceTool, datasetsTool string, toolRegistryRemap map[string]string) (*gptscript.GPTScript, error) {
 	if datasetsTool != defaultDatasetsTool {
 		loader.Remap[defaultDatasetsTool] = datasetsTool
 	}
-	if toolsRegistry != defaultToolsRegistry {
-		loader.Remap[defaultToolsRegistry] = toolsRegistry
+	for original, remap := range toolRegistryRemap {
+		loader.Remap[original] = remap
 	}
 
 	if os.Getenv("GPTSCRIPT_URL") != "" {
@@ -168,7 +165,23 @@ func New(ctx context.Context, config Config) (*Services, error) {
 		_ = os.Setenv("KNOW_INDEX_DSN", config.DSN)
 	}
 
-	if err := credstores.Init(ctx, config.ToolRegistry, config.DSN, credstores.Options{
+	// TODO(njhale): This is a hack since the struct tag defaulting isn't working for the []string field.
+	// 	Remove once I figure out how to do that correctly.
+	if len(config.ToolRegistries) < 1 {
+		config.ToolRegistries = []string{"github.com/obot-platform/tools"}
+	}
+
+	toolRegistryRemap, toolRegistryURLs, err := parseToolRegistries(config.ToolRegistries)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse tool registries: %w", err)
+	}
+
+	if len(toolRegistryURLs) < 1 {
+		return nil, fmt.Errorf("no tool registries specified")
+	}
+
+	// The first tool registry is the "core registry" and must contain credential stores tools
+	if err := credstores.Init(ctx, toolRegistryURLs[0], config.DSN, credstores.Options{
 		AWSKMSKeyARN:         config.AWSKMSKeyARN,
 		EncryptionConfigFile: config.EncryptionConfigFile,
 	}); err != nil {
@@ -205,7 +218,7 @@ func New(ctx context.Context, config Config) (*Services, error) {
 		config.UIHostname = "https://" + config.UIHostname
 	}
 
-	c, err := newGPTScript(ctx, config.WorkspaceTool, config.DatasetsTool, config.ToolRegistry)
+	c, err := newGPTScript(ctx, config.WorkspaceTool, config.DatasetsTool, toolRegistryRemap)
 	if err != nil {
 		return nil, err
 	}
@@ -229,16 +242,31 @@ func New(ctx context.Context, config Config) (*Services, error) {
 	}
 
 	var (
-		tokenServer             = &jwt.TokenService{}
-		events                  = events.NewEmitter(storageClient)
-		gatewayClient           = client.New(gatewayDB, config.AuthAdminEmails)
-		invoker                 = invoke.NewInvoker(storageClient, c, gatewayClient, config.Hostname, config.HTTPListenPort, tokenServer, events)
+		tokenServer   = &jwt.TokenService{}
+		events        = events.NewEmitter(storageClient)
+		gatewayClient = client.New(gatewayDB, config.AuthAdminEmails)
+		invoker       = invoke.NewInvoker(
+			storageClient,
+			c,
+			gatewayClient,
+			config.Hostname,
+			config.HTTPListenPort,
+			tokenServer,
+			events,
+		)
 		modelProviderDispatcher = dispatcher.New(invoker, storageClient, c)
 
 		proxyServer *proxy.Proxy
 	)
 
-	gatewayServer, err := gserver.New(ctx, gatewayDB, tokenServer, modelProviderDispatcher, config.AuthAdminEmails, gserver.Options(config.GatewayConfig))
+	gatewayServer, err := gserver.New(
+		ctx,
+		gatewayDB,
+		tokenServer,
+		modelProviderDispatcher,
+		config.AuthAdminEmails,
+		gserver.Options(config.GatewayConfig),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -292,13 +320,19 @@ func New(ctx context.Context, config Config) (*Services, error) {
 		WorkspaceProviderType: config.WorkspaceProviderType,
 		ServerURL:             config.Hostname,
 		DevUIPort:             devPort,
-		ToolRegistryURL:       config.ToolRegistry,
+		ToolRegistryURLs:      toolRegistryURLs,
 		Events:                events,
 		StorageClient:         storageClient,
 		Router:                r,
 		GPTClient:             c,
-		APIServer: server.NewServer(storageClient, c, authn.NewAuthenticator(authenticators),
-			authz.NewAuthorizer(r.Backend()), proxyServer, config.Hostname),
+		APIServer: server.NewServer(
+			storageClient,
+			c,
+			authn.NewAuthenticator(authenticators),
+			authz.NewAuthorizer(r.Backend()),
+			proxyServer,
+			config.Hostname,
+		),
 		TokenServer:                tokenServer,
 		Invoker:                    invoker,
 		AIHelper:                   aihelper.New(c, config.HelperModel),
@@ -339,4 +373,28 @@ func startDevMode(ctx context.Context, storageClient storage.Client) {
 			Namespace: "kube-system",
 		},
 	})
+}
+
+func parseToolRegistries(toolRegistries []string) (map[string]string, []string, error) {
+	remap := make(map[string]string)
+	urls := make([]string, 0, len(toolRegistries))
+
+	for _, registry := range toolRegistries {
+		parts := strings.Split(registry, ":")
+		if len(parts) > 2 {
+			return nil, nil, fmt.Errorf("invalid tool registry format: %q", registry)
+		}
+
+		var original, remapped string
+		if len(parts) == 2 {
+			original, remapped = parts[0], parts[1]
+		} else {
+			original, remapped = parts[0], parts[0]
+		}
+
+		remap[original] = remapped
+		urls = append(urls, remapped)
+	}
+
+	return remap, urls, nil
 }
