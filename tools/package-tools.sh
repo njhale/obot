@@ -27,6 +27,26 @@ if [ ! -e workspace-provider ]; then
     git clone --depth=1 https://github.com/gptscript-ai/workspace-provider
 fi
 
+if [ "${ENTERPRISE}" = "true" ]; then
+  if [ ! -e obot-enterprise-tools ]; then
+    git clone --depth=1 https://github.com/obot-platform/enterprise-tools obot-enterprise-tools
+  fi
+
+  ./obot-enterprise-tools/scripts/build.sh
+
+  for pj in $(find obot-enterprise-tools -name package.json | grep -v node_modules); do
+    if [ $(basename $(dirname $pj)) == common ]; then
+        continue
+    fi
+    (
+        cd $(dirname $pj)
+        echo Building $PWD
+        pnpm i
+    )
+  done
+
+fi
+
 cd workspace-provider
 go build -ldflags="-s -w" -o bin/gptscript-go-tool .
 

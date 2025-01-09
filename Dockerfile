@@ -1,3 +1,5 @@
+ARG ENTERPRISE=false
+
 FROM cgr.dev/chainguard/wolfi-base AS base
 
 RUN apk add --no-cache go make git npm pnpm
@@ -12,6 +14,7 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     make all
 
 FROM base AS tools
+ARG ENTERPRISE
 RUN apk add --no-cache curl python-3.13 py3.13-pip
 WORKDIR /app
 COPY . .
@@ -19,7 +22,7 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/go/pkg/mod \
-    UV_LINK_MODE=copy BIN_DIR=/bin make package-tools
+    UV_LINK_MODE=copy BIN_DIR=/bin ENTERPRISE=$ENTERPRISE make package-tools
 
 FROM cgr.dev/chainguard/postgres:latest-dev AS build-pgvector
 RUN apk add build-base git postgresql-dev
@@ -32,6 +35,7 @@ RUN git clone --branch v0.8.0 https://github.com/pgvector/pgvector.git && \
     rm -rf pgvector
 
 FROM cgr.dev/chainguard/postgres:latest-dev AS final
+ARG ENTERPRISE
 ENV POSTGRES_USER=obot
 ENV POSTGRES_PASSWORD=obot
 ENV POSTGRES_DB=obot
@@ -60,7 +64,7 @@ ENV XDG_CACHE_HOME=/data/cache
 ENV GPTSCRIPT_SYSTEM_TOOLS_DIR=/obot-tools/
 ENV OBOT_SERVER_WORKSPACE_TOOL=/obot-tools/workspace-provider
 ENV OBOT_SERVER_DATASETS_TOOL=/obot-tools/datasets
-ENV OBOT_SERVER_TOOL_REGISTRY=/obot-tools
+ENV ENTERPRISE=$ENTERPRISE
 ENV OBOT_SERVER_ENCRYPTION_CONFIG_FILE=/encryption.yaml
 ENV BAAAH_THREADINESS=20
 ENV TERM=vt100

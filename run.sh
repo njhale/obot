@@ -21,6 +21,8 @@ if [[ -v ENABLE_SSHD ]]; then
 fi
 
 mkdir -p /data/cache
+
+
 # This is YAML
 export OBOT_SERVER_VERSIONS="$(cat <<VERSIONS
 "github.com/obot-platform/tools": "$(cd /obot-tools && git rev-parse HEAD)"
@@ -31,6 +33,16 @@ export OBOT_SERVER_VERSIONS="$(cat <<VERSIONS
 "chrome": "$(echo $(/opt/google/chrome/chrome --version))"
 VERSIONS
 )"
+
+export OBOT_SERVER_TOOL_REGISTRIES="github.com/obot-platform/tools:/obot-tools"
+if [ "${ENTERPRISE}" = "true" ]; then
+  OBOT_SERVER_TOOL_REGISTRIES+=",github.com/obot-platform/enterprise-tools:/obot-enterprise-tools"
+  export OBOT_SERVER_VERSIONS="$(cat <<VERSIONS
+"github.com/obot-platform/enterprise-tools": "$(cd /obot-enterprise-tools && git rev-parse HEAD)"
+${OBOT_SERVER_VERSIONS}
+VERSIONS
+)"
+fi
 
 if [ -z "$OBOT_SERVER_DSN" ]; then
   echo "OBOT_SERVER_DSN is not set. Starting PostgreSQL process..."
