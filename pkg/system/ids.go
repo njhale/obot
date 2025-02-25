@@ -24,6 +24,7 @@ const (
 	AliasPrefix               = "al1"
 	DefaultModelAliasPrefix   = "dma1"
 	ToolPrefix                = "tl1"
+	TriggerPrefix             = "tr1"
 	ProjectPrefix             = "p1"
 	ThreadTemplatePrefix      = "tt1"
 )

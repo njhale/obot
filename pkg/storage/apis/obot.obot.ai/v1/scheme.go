@@ -53,6 +53,8 @@ func AddToSchemeWithGV(scheme *runtime.Scheme, schemeGroupVersion schema.GroupVe
 		&KnowledgeSetList{},
 		&ToolReference{},
 		&ToolReferenceList{},
+		&Trigger{},
+		&TriggerList{},
 		&Workspace{},
 		&WorkspaceList{},
 		&Webhook{},
