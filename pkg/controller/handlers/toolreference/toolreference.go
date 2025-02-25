@@ -46,6 +46,7 @@ type index struct {
 	System                   map[string]indexEntry `json:"system,omitempty"`
 	ModelProviders           map[string]indexEntry `json:"modelProviders,omitempty"`
 	AuthProviders            map[string]indexEntry `json:"authProviders,omitempty"`
+	TriggerProviders         map[string]indexEntry `json:"triggerProviders,omitempty"`
 }
 
 type Handler struct {
@@ -126,6 +127,7 @@ func (h *Handler) readFromRegistry(ctx context.Context, c client.Client) error {
 		toAdd = append(toAdd, h.toolsToToolReferences(ctx, types.ToolReferenceTypeSystem, registryURL, index.System)...)
 		toAdd = append(toAdd, h.toolsToToolReferences(ctx, types.ToolReferenceTypeModelProvider, registryURL, index.ModelProviders)...)
 		toAdd = append(toAdd, h.toolsToToolReferences(ctx, types.ToolReferenceTypeAuthProvider, registryURL, index.AuthProviders)...)
+		toAdd = append(toAdd, h.toolsToToolReferences(ctx, types.ToolReferenceTypeTriggerProvider, registryURL, index.TriggerProviders)...)
 		toAdd = append(toAdd, h.toolsToToolReferences(ctx, types.ToolReferenceTypeTool, registryURL, index.Tools)...)
 		toAdd = append(toAdd, h.toolsToToolReferences(ctx, types.ToolReferenceTypeStepTemplate, registryURL, index.StepTemplates)...)
 		toAdd = append(toAdd, h.toolsToToolReferences(ctx, types.ToolReferenceTypeKnowledgeDataSource, registryURL, index.KnowledgeDataSources)...)
@@ -431,4 +433,42 @@ func (h *Handler) CleanupModelProvider(req router.Request, _ router.Response) er
 
 func modelName(modelProviderName, modelName string) string {
 	return name.SafeConcatName(system.ModelPrefix, modelProviderName, fmt.Sprintf("%x", sha256.Sum256([]byte(modelName))))
+}
+
+func (h *Handler) EnsureTriggerProvider(req router.Request, _ router.Response) error {
+	toolRef := req.Object.(*v1.ToolReference)
+	if toolRef.Spec.Type != types.ToolReferenceTypeModelProvider || toolRef.Status.Tool == nil {
+		return nil
+	}
+
+	tps, err := providers.ConvertTriggerProviderToolRef(*toolRef, nil)
+	if err != nil {
+		return err
+	}
+	if len(tps.RequiredConfigurationParameters) > 0 {
+		cred, err := h.gptClient.RevealCredential(req.Ctx, []string{string(toolRef.UID), system.GenericModelProviderCredentialContext}, toolRef.Name)
+		if err != nil {
+			if errors.As(err, &gptscript.ErrNotFound{}) {
+				// Unable to find credential, ensure all triggers are removed for this trigger provider
+				return nil
+			}
+			return err
+		}
+
+		tps, err = providers.ConvertTriggerProviderToolRef(*toolRef, cred.Env)
+		if err != nil {
+			return err
+		}
+
+		if !tps.Configured {
+			return nil
+		}
+	}
+	// TODO(njhale): start the trigger provider here
+	// h.dispatcher.URLForTriggerProvider(req.Ctx, req.Namespace, toolRef.Name)
+	// if err != nil {
+	//   return err
+	// }
+
+	return nil
 }

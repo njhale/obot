@@ -10,6 +10,7 @@ import (
 
 type ProviderMeta struct {
 	types.CommonProviderMetadata
+	ObotScopes      []string                               `json:"obotScopes"`
 	EnvVars         []types.ProviderConfigurationParameter `json:"envVars"`
 	OptionalEnvVars []types.ProviderConfigurationParameter `json:"optionalEnvVars"`
 }
