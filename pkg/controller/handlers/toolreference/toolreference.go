@@ -489,11 +489,13 @@ func (h *Handler) EnsureTriggerProvider(req router.Request, _ router.Response) e
 			return nil
 		}
 	}
-	// TODO(njhale): start the trigger provider here
-	// h.dispatcher.URLForTriggerProvider(req.Ctx, req.Namespace, toolRef.Name)
-	// if err != nil {
-	//   return err
-	// }
+
+	url, err := h.dispatcher.URLForTriggerProvider(req.Ctx, req.Namespace, toolRef.Name)
+	if err != nil {
+		return err
+	}
+
+	log.Debugf("ProviderTrigger provider %s running at %s", toolRef.Name, url)
 
 	return nil
 }

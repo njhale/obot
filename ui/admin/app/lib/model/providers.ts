@@ -33,3 +33,7 @@ export type ModelProvider = Provider & {
 };
 
 export type AuthProvider = Provider;
+
+export type TriggerProvider = Provider & {
+	obotScopes?: string[];
+};

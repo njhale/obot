@@ -9,44 +9,44 @@ import (
 )
 
 var (
-	_ fields.Fields = (*Trigger)(nil)
-	_ Generationed  = (*Trigger)(nil)
+	_ fields.Fields = (*ProviderTrigger)(nil)
+	_ Generationed  = (*ProviderTrigger)(nil)
 )
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-type TriggerList struct {
+type ProviderTriggerList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
-	Items           []Trigger `json:"items"`
+	Items           []ProviderTrigger `json:"items"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-type Trigger struct {
+type ProviderTrigger struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   TriggerSpec   `json:"spec"`
-	Status TriggerStatus `json:"status,omitempty"`
+	Spec   ProviderTriggerSpec   `json:"spec"`
+	Status ProviderTriggerStatus `json:"status,omitempty"`
 }
 
-type TriggerSpec struct {
-	types.TriggerManifest
+type ProviderTriggerSpec struct {
+	types.ProviderTriggerManifest
 	Workflow   string `json:"workflow"`
 	ThreadName string
 }
 
-type TriggerStatus struct {
+type ProviderTriggerStatus struct {
 	OptionsValid       *bool `json:"optionsValid,omitempty"`
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
-func (d *Trigger) Has(field string) (exists bool) {
+func (d *ProviderTrigger) Has(field string) (exists bool) {
 	return slices.Contains(d.FieldNames(), field)
 }
 
-func (d *Trigger) Get(field string) (value string) {
+func (d *ProviderTrigger) Get(field string) (value string) {
 	switch field {
 	case "spec.threadName":
 		return d.Spec.ThreadName
@@ -58,29 +58,29 @@ func (d *Trigger) Get(field string) (value string) {
 	return ""
 }
 
-func (d *Trigger) FieldNames() []string {
+func (d *ProviderTrigger) FieldNames() []string {
 	return []string{"spec.threadName", "spec.workflow", "spec.provider"}
 }
 
-func (*Trigger) GetColumns() [][]string {
+func (*ProviderTrigger) GetColumns() [][]string {
 	return [][]string{
 		{"Name", "Name"},
 		{"Workflow", "Spec.Workflow"},
-		{"Trigger Provider", "Spec.Provider"},
+		{"ProviderTrigger Provider", "Spec.Provider"},
 		{"Configuration Valid", "Status.OptionsValid"},
 		{"Created", "{{ago .CreationTimestamp}}"},
 		{"Description", "Spec.Description"},
 	}
 }
 
-func (d *Trigger) GetObservedGeneration() int64 {
+func (d *ProviderTrigger) GetObservedGeneration() int64 {
 	return d.Status.ObservedGeneration
 }
 
-func (d *Trigger) SetObservedGeneration(gen int64) {
+func (d *ProviderTrigger) SetObservedGeneration(gen int64) {
 	d.Status.ObservedGeneration = gen
 }
 
-func (*Trigger) DeleteRefs() []Ref {
+func (*ProviderTrigger) DeleteRefs() []Ref {
 	return nil
 }

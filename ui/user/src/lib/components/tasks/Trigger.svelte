@@ -3,6 +3,7 @@
 	import Schedule from '$lib/components/tasks/Schedule.svelte';
 	import { onMount } from 'svelte';
 	import OnDemand from '$lib/components/tasks/OnDemand.svelte';
+	import ByTriggerProvider from '$lib/components/tasks/ByTriggerProvider.svelte';
 
 	interface Props {
 		task?: Task;
@@ -34,7 +35,7 @@
 		return '';
 	});
 	let visible: boolean = $derived.by(() => {
-		if (task.webhook || task.schedule || task.email) {
+		if (task.webhook || task.schedule || task.email || task.byTriggerProvider) {
 			return true;
 		}
 		return Object.keys(task.onDemand?.params ?? {}).length > 0;
@@ -67,6 +68,9 @@
 		}
 		if (task.email) {
 			return 'email';
+		}
+		if (task.byTriggerProvider) {
+			return 'byTriggerProvider';
 		}
 		return 'onDemand';
 	}
@@ -104,6 +108,15 @@
 				</h3>
 				{email}
 			</div>
+		{/if}
+		{#if selectedTrigger() === 'byTriggerProvider'}
+			<ByTriggerProvider
+				{task}
+				{editMode}
+				onChanged={async (updatedTask) => {
+					await onChanged?.(updatedTask);
+				}}
+			/>
 		{/if}
 		{#if selectedTrigger() === 'onDemand'}
 			<OnDemand

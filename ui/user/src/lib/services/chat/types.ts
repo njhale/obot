@@ -235,7 +235,13 @@ export interface Task {
 	email?: object;
 	webhook?: object;
 	onDemand?: OnDemand;
+	byTriggerProvider?: ByTriggerProvider;
 	alias?: string;
+}
+
+export interface ByTriggerProvider {
+	provider: string;
+	options?: string;
 }
 
 export interface OnDemand {

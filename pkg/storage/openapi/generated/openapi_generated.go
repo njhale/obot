@@ -86,6 +86,9 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/obot-platform/obot/apiclient/types.Prompt":                                     schema_obot_platform_obot_apiclient_types_Prompt(ref),
 		"github.com/obot-platform/obot/apiclient/types.PromptResponse":                             schema_obot_platform_obot_apiclient_types_PromptResponse(ref),
 		"github.com/obot-platform/obot/apiclient/types.ProviderConfigurationParameter":             schema_obot_platform_obot_apiclient_types_ProviderConfigurationParameter(ref),
+		"github.com/obot-platform/obot/apiclient/types.ProviderTrigger":                            schema_obot_platform_obot_apiclient_types_ProviderTrigger(ref),
+		"github.com/obot-platform/obot/apiclient/types.ProviderTriggerList":                        schema_obot_platform_obot_apiclient_types_ProviderTriggerList(ref),
+		"github.com/obot-platform/obot/apiclient/types.ProviderTriggerManifest":                    schema_obot_platform_obot_apiclient_types_ProviderTriggerManifest(ref),
 		"github.com/obot-platform/obot/apiclient/types.Run":                                        schema_obot_platform_obot_apiclient_types_Run(ref),
 		"github.com/obot-platform/obot/apiclient/types.RunList":                                    schema_obot_platform_obot_apiclient_types_RunList(ref),
 		"github.com/obot-platform/obot/apiclient/types.Schedule":                                   schema_obot_platform_obot_apiclient_types_Schedule(ref),
@@ -94,6 +97,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/obot-platform/obot/apiclient/types.Table":                                      schema_obot_platform_obot_apiclient_types_Table(ref),
 		"github.com/obot-platform/obot/apiclient/types.TableList":                                  schema_obot_platform_obot_apiclient_types_TableList(ref),
 		"github.com/obot-platform/obot/apiclient/types.Task":                                       schema_obot_platform_obot_apiclient_types_Task(ref),
+		"github.com/obot-platform/obot/apiclient/types.TaskByTriggerProvider":                      schema_obot_platform_obot_apiclient_types_TaskByTriggerProvider(ref),
 		"github.com/obot-platform/obot/apiclient/types.TaskEmail":                                  schema_obot_platform_obot_apiclient_types_TaskEmail(ref),
 		"github.com/obot-platform/obot/apiclient/types.TaskList":                                   schema_obot_platform_obot_apiclient_types_TaskList(ref),
 		"github.com/obot-platform/obot/apiclient/types.TaskManifest":                               schema_obot_platform_obot_apiclient_types_TaskManifest(ref),
@@ -119,9 +123,6 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/obot-platform/obot/apiclient/types.ToolReference":                              schema_obot_platform_obot_apiclient_types_ToolReference(ref),
 		"github.com/obot-platform/obot/apiclient/types.ToolReferenceList":                          schema_obot_platform_obot_apiclient_types_ToolReferenceList(ref),
 		"github.com/obot-platform/obot/apiclient/types.ToolReferenceManifest":                      schema_obot_platform_obot_apiclient_types_ToolReferenceManifest(ref),
-		"github.com/obot-platform/obot/apiclient/types.Trigger":                                    schema_obot_platform_obot_apiclient_types_Trigger(ref),
-		"github.com/obot-platform/obot/apiclient/types.TriggerList":                                schema_obot_platform_obot_apiclient_types_TriggerList(ref),
-		"github.com/obot-platform/obot/apiclient/types.TriggerManifest":                            schema_obot_platform_obot_apiclient_types_TriggerManifest(ref),
 		"github.com/obot-platform/obot/apiclient/types.TriggerProvider":                            schema_obot_platform_obot_apiclient_types_TriggerProvider(ref),
 		"github.com/obot-platform/obot/apiclient/types.TriggerProviderList":                        schema_obot_platform_obot_apiclient_types_TriggerProviderList(ref),
 		"github.com/obot-platform/obot/apiclient/types.TriggerProviderManifest":                    schema_obot_platform_obot_apiclient_types_TriggerProviderManifest(ref),
@@ -190,6 +191,10 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.OAuthAppLoginSpec":         schema_storage_apis_obotobotai_v1_OAuthAppLoginSpec(ref),
 		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.OAuthAppLoginStatus":       schema_storage_apis_obotobotai_v1_OAuthAppLoginStatus(ref),
 		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.OAuthAppSpec":              schema_storage_apis_obotobotai_v1_OAuthAppSpec(ref),
+		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.ProviderTrigger":           schema_storage_apis_obotobotai_v1_ProviderTrigger(ref),
+		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.ProviderTriggerList":       schema_storage_apis_obotobotai_v1_ProviderTriggerList(ref),
+		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.ProviderTriggerSpec":       schema_storage_apis_obotobotai_v1_ProviderTriggerSpec(ref),
+		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.ProviderTriggerStatus":     schema_storage_apis_obotobotai_v1_ProviderTriggerStatus(ref),
 		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.Ref":                       schema_storage_apis_obotobotai_v1_Ref(ref),
 		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.Run":                       schema_storage_apis_obotobotai_v1_Run(ref),
 		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.RunList":                   schema_storage_apis_obotobotai_v1_RunList(ref),
@@ -221,10 +226,6 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.ToolShortDescription":      schema_storage_apis_obotobotai_v1_ToolShortDescription(ref),
 		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.ToolSpec":                  schema_storage_apis_obotobotai_v1_ToolSpec(ref),
 		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.ToolStatus":                schema_storage_apis_obotobotai_v1_ToolStatus(ref),
-		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.Trigger":                   schema_storage_apis_obotobotai_v1_Trigger(ref),
-		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.TriggerList":               schema_storage_apis_obotobotai_v1_TriggerList(ref),
-		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.TriggerSpec":               schema_storage_apis_obotobotai_v1_TriggerSpec(ref),
-		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.TriggerStatus":             schema_storage_apis_obotobotai_v1_TriggerStatus(ref),
 		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.Webhook":                   schema_storage_apis_obotobotai_v1_Webhook(ref),
 		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.WebhookList":               schema_storage_apis_obotobotai_v1_WebhookList(ref),
 		"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.WebhookSpec":               schema_storage_apis_obotobotai_v1_WebhookSpec(ref),
@@ -3350,6 +3351,108 @@ func schema_obot_platform_obot_apiclient_types_ProviderConfigurationParameter(re
 	}
 }
 
+func schema_obot_platform_obot_apiclient_types_ProviderTrigger(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"Metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref("github.com/obot-platform/obot/apiclient/types.Metadata"),
+						},
+					},
+					"ProviderTriggerManifest": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref("github.com/obot-platform/obot/apiclient/types.ProviderTriggerManifest"),
+						},
+					},
+					"taskID": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+				},
+				Required: []string{"Metadata", "ProviderTriggerManifest", "taskID"},
+			},
+		},
+		Dependencies: []string{
+			"github.com/obot-platform/obot/apiclient/types.Metadata", "github.com/obot-platform/obot/apiclient/types.ProviderTriggerManifest"},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_ProviderTriggerList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("github.com/obot-platform/obot/apiclient/types.ProviderTrigger"),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			"github.com/obot-platform/obot/apiclient/types.ProviderTrigger"},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_ProviderTriggerManifest(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"description": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"provider": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"options": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+				},
+				Required: []string{"name", "description", "provider"},
+			},
+		},
+	}
+}
+
 func schema_obot_platform_obot_apiclient_types_Run(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -3661,12 +3764,45 @@ func schema_obot_platform_obot_apiclient_types_Task(ref common.ReferenceCallback
 							Format: "",
 						},
 					},
+					"projectID": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
 				},
-				Required: []string{"Metadata", "TaskManifest"},
+				Required: []string{"Metadata", "TaskManifest", "projectID"},
 			},
 		},
 		Dependencies: []string{
 			"github.com/obot-platform/obot/apiclient/types.Metadata", "github.com/obot-platform/obot/apiclient/types.TaskManifest"},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_TaskByTriggerProvider(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"provider": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"options": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+				},
+				Required: []string{"provider"},
+			},
+		},
 	}
 }
 
@@ -3761,12 +3897,17 @@ func schema_obot_platform_obot_apiclient_types_TaskManifest(ref common.Reference
 							Ref: ref("github.com/obot-platform/obot/apiclient/types.TaskOnDemand"),
 						},
 					},
+					"byTriggerProvider": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref("github.com/obot-platform/obot/apiclient/types.TaskByTriggerProvider"),
+						},
+					},
 				},
-				Required: []string{"name", "description", "steps", "schedule", "webhook", "email", "onDemand"},
+				Required: []string{"name", "description", "steps", "schedule", "webhook", "email", "onDemand", "byTriggerProvider"},
 			},
 		},
 		Dependencies: []string{
-			"github.com/obot-platform/obot/apiclient/types.Schedule", "github.com/obot-platform/obot/apiclient/types.TaskEmail", "github.com/obot-platform/obot/apiclient/types.TaskOnDemand", "github.com/obot-platform/obot/apiclient/types.TaskStep", "github.com/obot-platform/obot/apiclient/types.TaskWebhook"},
+			"github.com/obot-platform/obot/apiclient/types.Schedule", "github.com/obot-platform/obot/apiclient/types.TaskByTriggerProvider", "github.com/obot-platform/obot/apiclient/types.TaskEmail", "github.com/obot-platform/obot/apiclient/types.TaskOnDemand", "github.com/obot-platform/obot/apiclient/types.TaskStep", "github.com/obot-platform/obot/apiclient/types.TaskWebhook"},
 	}
 }
 
@@ -4659,108 +4800,6 @@ func schema_obot_platform_obot_apiclient_types_ToolReferenceManifest(ref common.
 					},
 				},
 				Required: []string{"name", "toolType"},
-			},
-		},
-	}
-}
-
-func schema_obot_platform_obot_apiclient_types_Trigger(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Type: []string{"object"},
-				Properties: map[string]spec.Schema{
-					"Metadata": {
-						SchemaProps: spec.SchemaProps{
-							Default: map[string]interface{}{},
-							Ref:     ref("github.com/obot-platform/obot/apiclient/types.Metadata"),
-						},
-					},
-					"TriggerManifest": {
-						SchemaProps: spec.SchemaProps{
-							Default: map[string]interface{}{},
-							Ref:     ref("github.com/obot-platform/obot/apiclient/types.TriggerManifest"),
-						},
-					},
-					"taskId": {
-						SchemaProps: spec.SchemaProps{
-							Default: "",
-							Type:    []string{"string"},
-							Format:  "",
-						},
-					},
-				},
-				Required: []string{"Metadata", "TriggerManifest", "taskId"},
-			},
-		},
-		Dependencies: []string{
-			"github.com/obot-platform/obot/apiclient/types.Metadata", "github.com/obot-platform/obot/apiclient/types.TriggerManifest"},
-	}
-}
-
-func schema_obot_platform_obot_apiclient_types_TriggerList(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Type: []string{"object"},
-				Properties: map[string]spec.Schema{
-					"items": {
-						SchemaProps: spec.SchemaProps{
-							Type: []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: map[string]interface{}{},
-										Ref:     ref("github.com/obot-platform/obot/apiclient/types.Trigger"),
-									},
-								},
-							},
-						},
-					},
-				},
-				Required: []string{"items"},
-			},
-		},
-		Dependencies: []string{
-			"github.com/obot-platform/obot/apiclient/types.Trigger"},
-	}
-}
-
-func schema_obot_platform_obot_apiclient_types_TriggerManifest(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Type: []string{"object"},
-				Properties: map[string]spec.Schema{
-					"name": {
-						SchemaProps: spec.SchemaProps{
-							Default: "",
-							Type:    []string{"string"},
-							Format:  "",
-						},
-					},
-					"description": {
-						SchemaProps: spec.SchemaProps{
-							Default: "",
-							Type:    []string{"string"},
-							Format:  "",
-						},
-					},
-					"provider": {
-						SchemaProps: spec.SchemaProps{
-							Default: "",
-							Type:    []string{"string"},
-							Format:  "",
-						},
-					},
-					"options": {
-						SchemaProps: spec.SchemaProps{
-							Type:   []string{"string"},
-							Format: "",
-						},
-					},
-				},
-				Required: []string{"name", "description", "provider"},
 			},
 		},
 	}
@@ -7616,6 +7655,160 @@ func schema_storage_apis_obotobotai_v1_OAuthAppSpec(ref common.ReferenceCallback
 	}
 }
 
+func schema_storage_apis_obotobotai_v1_ProviderTrigger(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref("k8s.io/apimachinery/pkg/apis/meta/v1.ObjectMeta"),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref("github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.ProviderTriggerSpec"),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref("github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.ProviderTriggerStatus"),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.ProviderTriggerSpec", "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.ProviderTriggerStatus", "k8s.io/apimachinery/pkg/apis/meta/v1.ObjectMeta"},
+	}
+}
+
+func schema_storage_apis_obotobotai_v1_ProviderTriggerList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref("k8s.io/apimachinery/pkg/apis/meta/v1.ListMeta"),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.ProviderTrigger"),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"metadata", "items"},
+			},
+		},
+		Dependencies: []string{
+			"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.ProviderTrigger", "k8s.io/apimachinery/pkg/apis/meta/v1.ListMeta"},
+	}
+}
+
+func schema_storage_apis_obotobotai_v1_ProviderTriggerSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"ProviderTriggerManifest": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref("github.com/obot-platform/obot/apiclient/types.ProviderTriggerManifest"),
+						},
+					},
+					"workflow": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"ThreadName": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+				},
+				Required: []string{"ProviderTriggerManifest", "workflow", "ThreadName"},
+			},
+		},
+		Dependencies: []string{
+			"github.com/obot-platform/obot/apiclient/types.ProviderTriggerManifest"},
+	}
+}
+
+func schema_storage_apis_obotobotai_v1_ProviderTriggerStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"optionsValid": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"boolean"},
+							Format: "",
+						},
+					},
+					"observedGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int64",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func schema_storage_apis_obotobotai_v1_Ref(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -9200,160 +9393,6 @@ func schema_storage_apis_obotobotai_v1_ToolStatus(ref common.ReferenceCallback) 
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
 				Type: []string{"object"},
-			},
-		},
-	}
-}
-
-func schema_storage_apis_obotobotai_v1_Trigger(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Type: []string{"object"},
-				Properties: map[string]spec.Schema{
-					"kind": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"apiVersion": {
-						SchemaProps: spec.SchemaProps{
-							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"metadata": {
-						SchemaProps: spec.SchemaProps{
-							Default: map[string]interface{}{},
-							Ref:     ref("k8s.io/apimachinery/pkg/apis/meta/v1.ObjectMeta"),
-						},
-					},
-					"spec": {
-						SchemaProps: spec.SchemaProps{
-							Default: map[string]interface{}{},
-							Ref:     ref("github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.TriggerSpec"),
-						},
-					},
-					"status": {
-						SchemaProps: spec.SchemaProps{
-							Default: map[string]interface{}{},
-							Ref:     ref("github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.TriggerStatus"),
-						},
-					},
-				},
-				Required: []string{"spec"},
-			},
-		},
-		Dependencies: []string{
-			"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.TriggerSpec", "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.TriggerStatus", "k8s.io/apimachinery/pkg/apis/meta/v1.ObjectMeta"},
-	}
-}
-
-func schema_storage_apis_obotobotai_v1_TriggerList(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Type: []string{"object"},
-				Properties: map[string]spec.Schema{
-					"kind": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"apiVersion": {
-						SchemaProps: spec.SchemaProps{
-							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"metadata": {
-						SchemaProps: spec.SchemaProps{
-							Default: map[string]interface{}{},
-							Ref:     ref("k8s.io/apimachinery/pkg/apis/meta/v1.ListMeta"),
-						},
-					},
-					"items": {
-						SchemaProps: spec.SchemaProps{
-							Type: []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: map[string]interface{}{},
-										Ref:     ref("github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.Trigger"),
-									},
-								},
-							},
-						},
-					},
-				},
-				Required: []string{"metadata", "items"},
-			},
-		},
-		Dependencies: []string{
-			"github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1.Trigger", "k8s.io/apimachinery/pkg/apis/meta/v1.ListMeta"},
-	}
-}
-
-func schema_storage_apis_obotobotai_v1_TriggerSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Type: []string{"object"},
-				Properties: map[string]spec.Schema{
-					"TriggerManifest": {
-						SchemaProps: spec.SchemaProps{
-							Default: map[string]interface{}{},
-							Ref:     ref("github.com/obot-platform/obot/apiclient/types.TriggerManifest"),
-						},
-					},
-					"workflow": {
-						SchemaProps: spec.SchemaProps{
-							Default: "",
-							Type:    []string{"string"},
-							Format:  "",
-						},
-					},
-					"ThreadName": {
-						SchemaProps: spec.SchemaProps{
-							Default: "",
-							Type:    []string{"string"},
-							Format:  "",
-						},
-					},
-				},
-				Required: []string{"TriggerManifest", "workflow", "ThreadName"},
-			},
-		},
-		Dependencies: []string{
-			"github.com/obot-platform/obot/apiclient/types.TriggerManifest"},
-	}
-}
-
-func schema_storage_apis_obotobotai_v1_TriggerStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Type: []string{"object"},
-				Properties: map[string]spec.Schema{
-					"optionsValid": {
-						SchemaProps: spec.SchemaProps{
-							Type:   []string{"boolean"},
-							Format: "",
-						},
-					},
-					"observedGeneration": {
-						SchemaProps: spec.SchemaProps{
-							Type:   []string{"integer"},
-							Format: "int64",
-						},
-					},
-				},
 			},
 		},
 	}

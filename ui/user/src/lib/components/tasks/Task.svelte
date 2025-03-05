@@ -24,7 +24,8 @@
 	let task = $state<Task>({
 		name: 'Loading...',
 		steps: [],
-		id: ''
+		id: '',
+		byTriggerProvider: undefined
 	});
 	let editMode = $state(false);
 

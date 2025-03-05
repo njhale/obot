@@ -1,16 +1,16 @@
 package types
 
-type Trigger struct {
+type ProviderTrigger struct {
 	Metadata
-	TriggerManifest
-	TaskID string `json:"taskId"`
+	ProviderTriggerManifest
+	TaskID string `json:"taskID"`
 }
 
-type TriggerManifest struct {
+type ProviderTriggerManifest struct {
 	Name        string  `json:"name"`
 	Description string  `json:"description"`
 	Provider    string  `json:"provider"`
 	Options     *string `json:"options,omitempty"`
 }
 
-type TriggerList List[Trigger]
+type ProviderTriggerList List[ProviderTrigger]

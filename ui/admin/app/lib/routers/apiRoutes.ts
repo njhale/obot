@@ -330,7 +330,19 @@ export const ApiRoutes = {
 		login: () => buildUrl("/bootstrap/login"),
 		logout: () => buildUrl("/bootstrap/logout"),
 	},
+	triggerProviders: {
+		getTriggerProviders: () => buildUrl("/trigger-providers"),
+		getTriggerProviderById: (id: string) => 
+			buildUrl(`/trigger-providers/${id}`),
+		configure: (id: string) => 
+			buildUrl(`/trigger-providers/${id}/configure`),
+		deconfigure: (id: string) => 
+			buildUrl(`/trigger-providers/${id}/deconfigure`),
+		reveal: (id: string) => 
+			buildUrl(`/trigger-providers/${id}/reveal`),
+	},
 };
+
 
 /** revalidates the cache for all routes that match the filter callback
  *

@@ -29,6 +29,8 @@ func Router(services *services.Services) (http.Handler, error) {
 	availableModels := handlers.NewAvailableModelsHandler(services.GPTClient, services.ProviderDispatcher)
 	modelProviders := handlers.NewModelProviderHandler(services.GPTClient, services.ProviderDispatcher, services.Invoker)
 	authProviders := handlers.NewAuthProviderHandler(services.GPTClient, services.ProviderDispatcher)
+	providerTrigger := handlers.NewProviderTriggerHandler()
+	triggerProviders := handlers.NewTriggerProviderHandler(services.GPTClient, services.ProviderDispatcher, services.Invoker)
 	prompt := handlers.NewPromptHandler(services.GPTClient)
 	emailReceiver := handlers.NewEmailReceiverHandler(services.EmailServerName)
 	defaultModelAliases := handlers.NewDefaultModelAliasHandler()
@@ -402,6 +404,20 @@ func Router(services *services.Services) (http.Handler, error) {
 	services.GatewayServer.AddRoutes(services.APIServer)
 
 	services.APIServer.HTTPHandle("/", ui.Handler(services.DevUIPort, services.StorageClient))
+
+	// Provider Triggers
+	mux.HandleFunc("GET /api/provider-triggers", providerTrigger.List)
+	mux.HandleFunc("GET /api/provider-triggers/{id}", providerTrigger.ByID)
+	mux.HandleFunc("PUT /api/provider-triggers/{id}", providerTrigger.Update)
+	mux.HandleFunc("DELETE /api/provider-triggers/{id}", providerTrigger.Delete)
+
+	// Trigger Providers
+	mux.HandleFunc("GET /api/trigger-providers", triggerProviders.List)
+	mux.HandleFunc("GET /api/trigger-providers/{id}", triggerProviders.ByID)
+	mux.HandleFunc("POST /api/trigger-providers/{id}/configure", triggerProviders.Configure)
+	mux.HandleFunc("POST /api/trigger-providers/{id}/deconfigure", triggerProviders.Deconfigure)
+	mux.HandleFunc("POST /api/trigger-providers/{id}/reveal", triggerProviders.Reveal)
+	mux.HandleFunc("GET /api/trigger-providers/{id}/options", triggerProviders.Options)
 
 	return services.APIServer, nil
 }

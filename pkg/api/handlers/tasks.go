@@ -472,9 +472,10 @@ func (t *TaskHandler) UpdateFromScope(req api.Context) error {
 }
 
 type triggers struct {
-	CronJob *v1.CronJob
-	Webhook *v1.Webhook
-	Email   *v1.EmailReceiver
+	CronJob         *v1.CronJob
+	Webhook         *v1.Webhook
+	Email           *v1.EmailReceiver
+	ProviderTrigger *v1.ProviderTrigger
 }
 
 func validate(task types.TaskManifest) error {
@@ -491,8 +492,11 @@ func validate(task types.TaskManifest) error {
 	if task.OnDemand != nil {
 		count++
 	}
+	if task.ByTriggerProvider != nil {
+		count++
+	}
 	if count > 1 {
-		return types.NewErrBadRequest("only one trigger is allowed, schedule, webhook, onDemand, or email")
+		return types.NewErrBadRequest("only one trigger is allowed, schedule, webhook, onDemand, email, or provider trigger")
 	}
 	return nil
 }
@@ -516,7 +520,52 @@ func (t *TaskHandler) updateTrigger(req api.Context, workflow *v1.Workflow, task
 		return nil, err
 	}
 
+	if err := t.updateProviderTrigger(req, workflow, task, &trigger); err != nil {
+		return nil, err
+	}
+
 	return &trigger, nil
+}
+
+func (t *TaskHandler) updateProviderTrigger(req api.Context, workflow *v1.Workflow, task types.TaskManifest, trigger *triggers) error {
+	triggerName := name.SafeHashConcatName(system.ProviderTriggerPrefix, workflow.Name)
+
+	var providerTrigger v1.ProviderTrigger
+	if err := req.Get(&providerTrigger, triggerName); kclient.IgnoreNotFound(err) != nil {
+		return err
+	}
+
+	if task.ByTriggerProvider == nil {
+		if providerTrigger.Name != "" {
+			return req.Delete(&providerTrigger)
+		}
+		return nil
+	}
+
+	if providerTrigger.Name == "" {
+		providerTrigger = v1.ProviderTrigger{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      triggerName,
+				Namespace: req.Namespace(),
+			},
+			Spec: v1.ProviderTriggerSpec{
+				ProviderTriggerManifest: types.ProviderTriggerManifest{
+					Name:        workflow.Spec.Manifest.Name,
+					Description: workflow.Spec.Manifest.Description,
+					Provider:    task.ByTriggerProvider.Provider,
+					Options:     task.ByTriggerProvider.Options,
+				},
+				Workflow:   workflow.Name,
+				ThreadName: workflow.Spec.ThreadName,
+			},
+		}
+		if err := req.Create(&providerTrigger); err != nil {
+			return err
+		}
+	}
+
+	trigger.ProviderTrigger = &providerTrigger
+	return nil
 }
 
 func (t *TaskHandler) updateEmail(req api.Context, workflow *v1.Workflow, task types.TaskManifest, trigger *triggers) error {
@@ -760,10 +809,16 @@ func (t *TaskHandler) get(req api.Context, workflow *v1.Workflow) error {
 		return err
 	}
 
+	var providerTrigger v1.ProviderTrigger
+	if err := req.Get(&providerTrigger, name.SafeHashConcatName(system.ProviderTriggerPrefix, workflow.Name)); kclient.IgnoreNotFound(err) != nil {
+		return err
+	}
+
 	return req.Write(convertTask(*workflow, &triggers{
-		CronJob: &cron,
-		Webhook: &webhook,
-		Email:   &email,
+		CronJob:         &cron,
+		Webhook:         &webhook,
+		Email:           &email,
+		ProviderTrigger: &providerTrigger,
 	}))
 }
 
@@ -881,6 +936,16 @@ func (t *TaskHandler) list(req api.Context, thread *v1.Thread) error {
 		emailReceiverMap[emailReceivers.Items[i].Name] = &emailReceivers.Items[i]
 	}
 
+	var providerTriggers v1.ProviderTriggerList
+	if err := req.List(&providerTriggers, selector); err != nil {
+		return err
+	}
+
+	providerTriggerMap := make(map[string]*v1.ProviderTrigger, len(providerTriggers.Items))
+	for i := range providerTriggers.Items {
+		providerTriggerMap[providerTriggers.Items[i].Name] = &providerTriggers.Items[i]
+	}
+
 	var workflows v1.WorkflowList
 	if err := req.List(&workflows, selector); err != nil {
 		return err
@@ -890,9 +955,10 @@ func (t *TaskHandler) list(req api.Context, thread *v1.Thread) error {
 
 	for _, workflow := range workflows.Items {
 		taskList.Items = append(taskList.Items, convertTask(workflow, &triggers{
-			CronJob: cronMap[name.SafeHashConcatName(system.CronJobPrefix, workflow.Name)],
-			Webhook: webhookMap[name.SafeHashConcatName(system.WebhookPrefix, workflow.Name)],
-			Email:   emailReceiverMap[name.SafeHashConcatName(system.EmailReceiverPrefix, workflow.Name)],
+			CronJob:         cronMap[name.SafeHashConcatName(system.CronJobPrefix, workflow.Name)],
+			Webhook:         webhookMap[name.SafeHashConcatName(system.WebhookPrefix, workflow.Name)],
+			Email:           emailReceiverMap[name.SafeHashConcatName(system.EmailReceiverPrefix, workflow.Name)],
+			ProviderTrigger: providerTriggerMap[name.SafeHashConcatName(system.ProviderTriggerPrefix, workflow.Name)],
 		}))
 	}
 
@@ -930,7 +996,12 @@ func convertTask(workflow v1.Workflow, trigger *triggers) types.Task {
 			Params: workflow.Spec.Manifest.Params,
 		}
 	}
-
+	if trigger != nil && trigger.ProviderTrigger != nil && trigger.ProviderTrigger.Name != "" {
+		task.ByTriggerProvider = &types.TaskByTriggerProvider{
+			Provider: trigger.ProviderTrigger.Spec.Provider,
+			Options:  trigger.ProviderTrigger.Spec.Options,
+		}
+	}
 	return task
 }
 

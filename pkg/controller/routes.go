@@ -102,6 +102,7 @@ func (c *Controller) setupRoutes() error {
 	root.Type(&v1.ToolReference{}).HandlerFunc(cleanup.Cleanup)
 	root.Type(&v1.ToolReference{}).HandlerFunc(toolRef.Populate)
 	root.Type(&v1.ToolReference{}).HandlerFunc(toolRef.BackPopulateModels)
+	root.Type(&v1.ToolReference{}).HandlerFunc(toolRef.EnsureTriggerProvider)
 	root.Type(&v1.ToolReference{}).FinalizeFunc(v1.ToolReferenceFinalizer, toolRef.CleanupModelProvider)
 
 	// EmailReceivers

@@ -18,6 +18,7 @@ import (
 	"github.com/obot-platform/obot/pkg/alias"
 	"github.com/obot-platform/obot/pkg/api/handlers/providers"
 	"github.com/obot-platform/obot/pkg/invoke"
+	"github.com/obot-platform/obot/pkg/jwt"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -30,6 +31,7 @@ type Dispatcher struct {
 	invoker                     *invoke.Invoker
 	gptscript                   *gptscript.GPTScript
 	client                      kclient.Client
+	tokenService                *jwt.TokenService
 	modelLock                   *sync.RWMutex
 	modelUrls                   map[string]*url.URL
 	authLock                    *sync.RWMutex
@@ -37,19 +39,24 @@ type Dispatcher struct {
 	configuredAuthProvidersLock *sync.RWMutex
 	configuredAuthProviders     []string
 	openAICred                  string
+	triggerLock                 *sync.RWMutex
+	triggerUrls                 map[string]*url.URL
 }
 
-func New(ctx context.Context, invoker *invoke.Invoker, c kclient.Client, gClient *gptscript.GPTScript) *Dispatcher {
+func New(ctx context.Context, invoker *invoke.Invoker, c kclient.Client, gClient *gptscript.GPTScript, tokenService *jwt.TokenService) *Dispatcher {
 	d := &Dispatcher{
 		invoker:                     invoker,
 		gptscript:                   gClient,
 		client:                      c,
+		tokenService:                tokenService,
 		modelLock:                   new(sync.RWMutex),
 		modelUrls:                   make(map[string]*url.URL),
 		authLock:                    new(sync.RWMutex),
 		authUrls:                    make(map[string]*url.URL),
 		configuredAuthProvidersLock: new(sync.RWMutex),
 		configuredAuthProviders:     make([]string, 0),
+		triggerLock:                 new(sync.RWMutex),
+		triggerUrls:                 make(map[string]*url.URL),
 	}
 
 	d.UpdateConfiguredAuthProviders(ctx)
@@ -427,4 +434,126 @@ func (d *Dispatcher) isAuthProviderConfigured(ctx context.Context, credCtx []str
 	}
 
 	return aps.Configured, aps.MissingConfigurationParameters, nil
+}
+
+func (d *Dispatcher) URLForTriggerProvider(ctx context.Context, namespace, triggerProviderName string) (*url.URL, error) {
+	key := namespace + "/" + triggerProviderName
+	// Check the map with the read lock.
+	d.triggerLock.RLock()
+	u, ok := d.triggerUrls[key]
+	d.triggerLock.RUnlock()
+	if ok && engine.IsDaemonRunning(u.String()) {
+		return u, nil
+	}
+
+	d.triggerLock.Lock()
+	defer d.triggerLock.Unlock()
+
+	// If we didn't find anything with the read lock, check with the write lock.
+	// It could be that another thread beat us to the write lock and added the trigger provider we desire.
+	u, ok = d.triggerUrls[key]
+	if ok && engine.IsDaemonRunning(u.String()) {
+		return u, nil
+	}
+
+	// We didn't find the trigger provider (or the daemon stopped for some reason), so start it and add it to the map.
+	u, err := d.startTriggerProvider(ctx, namespace, triggerProviderName)
+	if err != nil {
+		return nil, err
+	}
+
+	d.triggerUrls[key] = u
+	return u, nil
+}
+
+func (d *Dispatcher) startTriggerProvider(ctx context.Context, namespace, triggerProviderName string) (*url.URL, error) {
+	thread := &v1.Thread{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      system.ThreadPrefix + triggerProviderName,
+			Namespace: namespace,
+		},
+		Spec: v1.ThreadSpec{
+			SystemTask: true,
+		},
+	}
+
+	if err := d.client.Get(ctx, kclient.ObjectKey{Namespace: thread.Namespace, Name: thread.Name}, thread); apierrors.IsNotFound(err) {
+		if err = d.client.Create(ctx, thread); err != nil {
+			return nil, fmt.Errorf("failed to create thread: %w", err)
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to get thread: %w", err)
+	}
+
+	var triggerProvider v1.ToolReference
+	if err := d.client.Get(ctx, kclient.ObjectKey{Namespace: namespace, Name: triggerProviderName}, &triggerProvider); err != nil || triggerProvider.Spec.Type != types.ToolReferenceTypeTriggerProvider {
+		return nil, fmt.Errorf("failed to get trigger provider: %w", err)
+	}
+
+	credCtx := []string{string(triggerProvider.UID), system.GenericTriggerProviderCredentialContext}
+	if triggerProvider.Status.Tool == nil {
+		return nil, fmt.Errorf("trigger provider %q has not been resolved", triggerProviderName)
+	}
+
+	// Ensure that the trigger provider has been configured
+	tps, err := providers.ConvertTriggerProviderToolRef(triggerProvider, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert trigger provider: %w", err)
+	}
+	if len(tps.RequiredConfigurationParameters) > 0 {
+		cred, err := d.gptscript.RevealCredential(ctx, credCtx, triggerProviderName)
+		if err != nil {
+			return nil, fmt.Errorf("trigger provider is not configured: %w", err)
+		}
+
+		tps, err = providers.ConvertTriggerProviderToolRef(triggerProvider, cred.Env)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert trigger provider: %w", err)
+		}
+
+		if len(tps.MissingConfigurationParameters) > 0 {
+			return nil, fmt.Errorf("trigger provider is not configured: missing configuration parameters %s", strings.Join(tps.MissingConfigurationParameters, ", "))
+		}
+	}
+
+	// Craft a token with the required Obot scopes (if the daemon requires Obot API access)
+	var env []string
+	if len(tps.ObotScopes) > 0 {
+		obotToken, err := d.tokenService.NewToken(jwt.TokenContext{
+			Scope:       namespace,
+			ExtraScopes: tps.ObotScopes,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to Obot token for trigger provider: %w", err)
+		}
+		env = append(env, fmt.Sprintf("OBOT_API_TOKEN=%s", obotToken))
+	}
+
+	task, err := d.invoker.SystemTask(ctx, thread, triggerProviderName, "", invoke.SystemTaskOptions{
+		CredentialContextIDs: credCtx,
+		Env:                  env,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := task.Result(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return url.Parse(strings.TrimSpace(result.Output))
+}
+
+func (d *Dispatcher) StopTriggerProvider(namespace, triggerProviderName string) {
+	key := namespace + "/" + triggerProviderName
+	d.triggerLock.Lock()
+	defer d.triggerLock.Unlock()
+
+	u := d.triggerUrls[key]
+	if u != nil && engine.IsDaemonRunning(u.String()) {
+		engine.StopDaemon(u.String())
+	}
+
+	delete(d.triggerUrls, key)
 }

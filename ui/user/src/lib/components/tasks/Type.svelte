@@ -12,7 +12,7 @@
 	let { task, onChanged, editMode = false }: Props = $props();
 
 	let inputVisible = $derived.by(() => {
-		if (task?.webhook || task?.schedule || task?.email) {
+		if (task?.webhook || task?.schedule || task?.email || task?.byTriggerProvider) {
 			return false;
 		}
 		return Object.keys(task?.onDemand?.params ?? {}).length === 0;
@@ -22,7 +22,8 @@
 		const options: Record<string, string> = {
 			onDemand: 'on demand',
 			schedule: 'on interval',
-			webhook: 'on webhook'
+			webhook: 'on webhook',
+			byTriggerProvider: 'by trigger provider'
 		};
 		if (version.emailDomain) {
 			options['email'] = 'on email';
@@ -46,6 +47,9 @@
 		if (task?.email) {
 			return 'email';
 		}
+		if (task?.byTriggerProvider) {
+			return 'byTriggerProvider';
+		}
 		return 'onDemand';
 	}
 
@@ -65,7 +69,8 @@
 				},
 				webhook: undefined,
 				email: undefined,
-				onDemand: undefined
+				onDemand: undefined,
+				byTriggerProvider: undefined
 			});
 		}
 		if (value === 'webhook') {
@@ -74,7 +79,8 @@
 				schedule: undefined,
 				webhook: {},
 				email: undefined,
-				onDemand: undefined
+				onDemand: undefined,
+				byTriggerProvider: undefined
 			});
 		}
 		if (value === 'email') {
@@ -83,7 +89,8 @@
 				schedule: undefined,
 				webhook: undefined,
 				onDemand: undefined,
-				email: {}
+				email: {},
+				byTriggerProvider: undefined
 			});
 		}
 		if (value === 'onDemand') {
@@ -92,7 +99,21 @@
 				schedule: undefined,
 				webhook: undefined,
 				email: undefined,
-				onDemand: undefined
+				onDemand: undefined,
+				byTriggerProvider: undefined
+			});
+		}
+		if (value === 'byTriggerProvider') {
+			await onChanged?.({
+				...task,
+				schedule: undefined,
+				webhook: undefined,
+				email: undefined,
+				onDemand: undefined,
+				byTriggerProvider: {
+					provider: '',
+					options: ''
+				}
 			});
 		}
 	}

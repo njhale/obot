@@ -17,3 +17,8 @@ export const RecommendedModelProviders = [
 	CommonModelProviderIds.OPENAI,
 	CommonModelProviderIds.AZURE_OPENAI,
 ];
+
+
+export const CommonTriggerProviderIds = {
+	SLACK: "slack-trigger-provider",
+}
