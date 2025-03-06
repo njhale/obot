@@ -31,12 +31,12 @@ getTriggerProviderById.key = (providerId?: string) => {
     };
 };
 
-const configureTriggerProvider = async (
+const configureTriggerProviderById = async (
     providerKey: string,
     providerConfig: ProviderConfig
 ) => {
     const res = await request<TriggerProvider>({
-        url: ApiRoutes.triggerProviders.configure(providerKey).url,
+        url: ApiRoutes.triggerProviders.configureTriggerProviderById(providerKey).url,
         method: "POST",
         data: providerConfig,
         errorMessage: "Failed to configure the requested trigger provider.",
@@ -45,9 +45,9 @@ const configureTriggerProvider = async (
     return res.data;
 };
 
-const revealTriggerProvider = async (providerKey: string) => {
+const revealTriggerProviderById = async (providerKey: string) => {
     const res = await request<ProviderConfig>({
-        url: ApiRoutes.triggerProviders.reveal(providerKey).url,
+        url: ApiRoutes.triggerProviders.revealTriggerProviderById(providerKey).url,
         method: "POST",
         errorMessage: "Failed to reveal configuration for the requested trigger provider.",
         toastError: false,
@@ -55,18 +55,18 @@ const revealTriggerProvider = async (providerKey: string) => {
 
     return res.data;
 };
-revealTriggerProvider.key = (providerId?: string) => {
+revealTriggerProviderById.key = (providerId?: string) => {
     if (!providerId) return null;
 
     return {
-        url: ApiRoutes.triggerProviders.reveal(providerId).path,
+        url: ApiRoutes.triggerProviders.revealTriggerProviderById(providerId).path,
         providerId,
     };
 };
 
-const deconfigureTriggerProvider = async (providerKey: string) => {
+const deconfigureTriggerProviderById = async (providerKey: string) => {
     const res = await request<TriggerProvider>({
-        url: ApiRoutes.triggerProviders.deconfigure(providerKey).url,
+        url: ApiRoutes.triggerProviders.deconfigureTriggerProviderById(providerKey).url,
         method: "POST",
         errorMessage: "Failed to deconfigure the requested trigger provider.",
     });
@@ -77,7 +77,7 @@ const deconfigureTriggerProvider = async (providerKey: string) => {
 export const TriggerProviderApiService = {
     getTriggerProviders,
     getTriggerProviderById,
-    configureTriggerProvider,
-    revealTriggerProvider,
-    deconfigureTriggerProvider,
+    configureTriggerProviderById,
+    revealTriggerProviderById,
+    deconfigureTriggerProviderById,
 };

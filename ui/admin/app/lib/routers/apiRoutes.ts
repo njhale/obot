@@ -334,11 +334,11 @@ export const ApiRoutes = {
 		getTriggerProviders: () => buildUrl("/trigger-providers"),
 		getTriggerProviderById: (id: string) => 
 			buildUrl(`/trigger-providers/${id}`),
-		configure: (id: string) => 
+		configureTriggerProviderById: (id: string) =>
 			buildUrl(`/trigger-providers/${id}/configure`),
-		deconfigure: (id: string) => 
+		deconfigureTriggerProviderById: (id: string) =>
 			buildUrl(`/trigger-providers/${id}/deconfigure`),
-		reveal: (id: string) => 
+		revealTriggerProviderById: (id: string) =>
 			buildUrl(`/trigger-providers/${id}/reveal`),
 	},
 };

@@ -1,10 +1,10 @@
-import { MetaFunction } from "react-router";
-import { TriggerProvider } from "~/lib/model/providers";
-import { RouteHandle } from "~/lib/service/routeHandles";
-import { WarningAlert } from "~/components/composed/WarningAlert";
-import { useTriggerProviders } from "~/hooks/trigger-providers/useTriggerProviders";
-import { CommonTriggerProviderIds } from "~/components/auth-and-model-providers/constants";
-import { TriggerProviderList } from "~/components/auth-and-model-providers/TriggerProviderList";
+import {MetaFunction} from "react-router";
+import {TriggerProvider} from "~/lib/model/providers";
+import {RouteHandle} from "~/lib/service/routeHandles";
+import {WarningAlert} from "~/components/composed/WarningAlert";
+import {useTriggerProviders} from "~/hooks/trigger-providers/useTriggerProviders";
+import {CommonTriggerProviderIds} from "~/components/auth-and-model-providers/constants";
+import {TriggerProviderList} from "~/components/auth-and-model-providers/TriggerProviderList";
 
 const sortTriggerProviders = (triggerProviders: TriggerProvider[]) => {
     return [...triggerProviders].sort((a, b) => {
@@ -30,7 +30,7 @@ const sortTriggerProviders = (triggerProviders: TriggerProvider[]) => {
 };
 
 export default function TriggerProviders() {
-    const { configured: triggerProviderConfigured, triggerProviders } = useTriggerProviders();
+    const {configured: triggerProviderConfigured, triggerProviders} = useTriggerProviders();
     const sortedTriggerProviders = sortTriggerProviders(triggerProviders);
 
     return (
@@ -41,7 +41,7 @@ export default function TriggerProviders() {
                         <h2 className="mb-0 pb-0">Trigger Providers</h2>
                     </div>
                     {triggerProviderConfigured ? (
-                        <div className="h-16 w-full" />
+                        <div className="h-16 w-full"/>
                     ) : (
                         <WarningAlert
                             title="No Trigger Providers Configured!"
@@ -52,7 +52,7 @@ export default function TriggerProviders() {
 
                 <div className="flex h-full flex-col gap-8 overflow-hidden">
 
-                    <TriggerProviderList triggerProviders={sortedTriggerProviders} />
+                    <TriggerProviderList triggerProviders={sortedTriggerProviders}/>
                 </div>
             </div>
         </div>
@@ -60,9 +60,9 @@ export default function TriggerProviders() {
 }
 
 export const handle: RouteHandle = {
-    breadcrumb: () => [{ content: "Trigger Providers" }],
+    breadcrumb: () => [{content: "Trigger Providers"}],
 };
 
 export const meta: MetaFunction = () => {
-    return [{ title: `Obot • Trigger Providers` }];
+    return [{title: `Obot • Trigger Providers`}];
 };

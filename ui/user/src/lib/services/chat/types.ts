@@ -361,3 +361,16 @@ export interface AuthProvider {
 export interface AuthProviderList {
 	items: AuthProvider[];
 }
+
+export interface TriggerProvider {
+	configured: boolean;
+	icon?: string;
+	name: string;
+	namespace: string;
+	id: string;
+	description?: string;
+}
+
+export interface TriggerProviderList {
+	items: TriggerProvider[];
+}

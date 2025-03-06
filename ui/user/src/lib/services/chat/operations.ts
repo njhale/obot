@@ -25,7 +25,9 @@ import {
 	type ProjectShareList,
 	type ProjectAuthorizationList,
 	type ProjectCredentialList,
-	type ProjectShare
+	type ProjectShare,
+	type TriggerProvider,
+	type TriggerProviderList
 } from './types';
 
 export type Fetcher = typeof fetch;
@@ -817,4 +819,12 @@ export async function listProjectShares(opts?: { fetch?: Fetcher }): Promise<Pro
 
 export async function copyProject(assistantID: string, projectID: string): Promise<Project> {
 	return (await doPost(`/assistants/${assistantID}/projects/${projectID}/copy`, {})) as Project;
+}
+
+export async function listTriggerProviders(opts?: { fetch?: Fetcher }): Promise<TriggerProvider[]> {
+	const list = (await doGet('/trigger-providers', opts)) as TriggerProviderList;
+	if (!list.items) {
+		list.items = [];
+	}
+	return list.items.filter(provider => provider.configured);
 }

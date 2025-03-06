@@ -8,12 +8,14 @@ import { z } from "zod";
 import {
 	AuthProvider,
 	ModelProvider,
+	TriggerProvider,
 	ProviderConfig,
 	ProviderConfigurationParameter,
 } from "~/lib/model/providers";
 import { AuthProviderApiService } from "~/lib/service/api/authProviderApiService";
 import { ModelApiService } from "~/lib/service/api/modelApiService";
 import { ModelProviderApiService } from "~/lib/service/api/modelProviderApiService";
+import { TriggerProviderApiService } from "~/lib/service/api/triggerProviderApiService";
 
 import { HelperTooltipLabel } from "~/components/composed/HelperTooltip";
 import { ControlledInput } from "~/components/form/controlledInputs";
@@ -88,7 +90,7 @@ export function ProviderForm({
 	requiredParameters,
 	optionalParameters,
 }: {
-	provider: ModelProvider | AuthProvider;
+	provider: ModelProvider | AuthProvider | TriggerProvider;
 	onSuccess: () => void;
 	parameters: ProviderConfig;
 	requiredParameters: ProviderConfigurationParameter[];
@@ -138,6 +140,17 @@ export function ProviderForm({
 					ModelProviderApiService.revealModelProviderById.key(provider.id)
 				);
 				await fetchAvailableModels.execute(provider.id);
+			},
+		}
+	);
+
+	const configureTriggerProvider = useAsync(
+		TriggerProviderApiService.configureTriggerProviderById,
+		{
+			onSuccess: async () => {
+				onSuccess();
+				mutate(TriggerProviderApiService.getTriggerProviders.key());
+				mutate(TriggerProviderApiService.revealTriggerProviderById.key(provider.id));
 			},
 		}
 	);
@@ -202,6 +215,9 @@ export function ProviderForm({
 				case "authprovider":
 					await configureAuthProvider.execute(provider.id, allConfigParams);
 					break;
+				case "triggerprovider":
+					await configureTriggerProvider.execute(provider.id, allConfigParams);
+					break;
 			}
 		}
 	);
@@ -213,6 +229,7 @@ export function ProviderForm({
 		fetchAvailableModels.isLoading ||
 		configureModelProvider.isLoading ||
 		configureAuthProvider.isLoading ||
+		configureTriggerProvider.isLoading ||
 		isLoading;
 
 	return (
@@ -253,6 +270,24 @@ export function ProviderForm({
 									{(typeof fetchAvailableModels.error === "object" &&
 										"message" in fetchAvailableModels.error &&
 										(fetchAvailableModels.error.message as string)) ??
+										"Unknown error"}
+								</strong>
+							</AlertDescription>
+						</Alert>
+					</div>
+				)}
+			{provider.type === "triggerprovider" &&
+				configureTriggerProvider.error !== null && (
+					<div className="px-4">
+						<Alert variant="destructive">
+							<CircleAlertIcon className="h-4 w-4" />
+							<AlertTitle>An error occurred!</AlertTitle>
+							<AlertDescription>
+								Your configuration could not be saved:{" "}
+								<strong>
+									{(typeof configureTriggerProvider.error === "object" &&
+										"message" in configureTriggerProvider.error &&
+										(configureTriggerProvider.error.message as string)) ??
 										"Unknown error"}
 								</strong>
 							</AlertDescription>

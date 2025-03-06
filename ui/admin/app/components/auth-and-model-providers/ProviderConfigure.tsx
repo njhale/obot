@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import useSWR, { mutate } from "swr";
 
-import { AuthProvider, ModelProvider } from "~/lib/model/providers";
+import { AuthProvider, ModelProvider, TriggerProvider } from "~/lib/model/providers";
 import {
 	ForbiddenError,
 	NotFoundError,
@@ -11,6 +11,7 @@ import {
 import { AuthProviderApiService } from "~/lib/service/api/authProviderApiService";
 import { ModelApiService } from "~/lib/service/api/modelApiService";
 import { ModelProviderApiService } from "~/lib/service/api/modelProviderApiService";
+import { TriggerProviderApiService } from "~/lib/service/api/triggerProviderApiService";
 
 import { ProviderForm } from "~/components/auth-and-model-providers/ProviderForm";
 import { ProviderIcon } from "~/components/auth-and-model-providers/ProviderIcon";
@@ -28,7 +29,7 @@ import {
 } from "~/components/ui/dialog";
 
 type ProviderConfigureProps = {
-	provider: ModelProvider | AuthProvider;
+	provider: ModelProvider | AuthProvider | TriggerProvider;
 };
 
 export function ProviderConfigure({ provider }: ProviderConfigureProps) {
@@ -125,13 +126,21 @@ export function ProviderConfigureContent({
 	provider,
 	onSuccess,
 }: {
-	provider: ModelProvider | AuthProvider;
+	provider: ModelProvider | AuthProvider | TriggerProvider;
 	onSuccess: () => void;
 }) {
-	const revealByIdFunc =
-		provider.type === "modelprovider"
-			? ModelProviderApiService.revealModelProviderById
-			: AuthProviderApiService.revealAuthProviderById;
+	const revealByIdFunc = (() => {
+		switch (provider.type) {
+			case "modelprovider":
+				return ModelProviderApiService.revealModelProviderById;
+			case "authprovider":
+				return AuthProviderApiService.revealAuthProviderById;
+			case "triggerprovider":
+				return TriggerProviderApiService.revealTriggerProviderById;
+			default:
+				throw new Error(`Unknown provider type: ${provider.type}`);
+		}
+	})();
 
 	const revealProvider = useSWR(
 		revealByIdFunc.key(provider.id),
@@ -182,6 +191,11 @@ export function ProviderConfigureContent({
 					/>
 				</DialogDescription>
 			)}
+			{/* {provider.type === "triggerprovider" && provider.obotScopes && (
+				<DialogDescription className="px-4">
+					Required Obot Scopes: {provider.obotScopes.join(", ")}
+				</DialogDescription>
+			)} */}
 			{revealProvider.isLoading ? (
 				<LoadingSpinner />
 			) : (

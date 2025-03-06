@@ -8,6 +8,7 @@ import {
 	PuzzleIcon,
 	User,
 	Wrench,
+	ZapIcon,
 } from "lucide-react";
 import { Link, useLocation } from "react-router";
 import { $path } from "safe-routes";
@@ -82,6 +83,11 @@ const items = [
 		url: $path("/auth-providers"),
 		icon: LockIcon,
 		requiresAuth: true,
+	},
+	{
+		title: "Trigger Providers",
+		url: $path("/trigger-providers"),
+		icon: ZapIcon,
 	},
 ];
 

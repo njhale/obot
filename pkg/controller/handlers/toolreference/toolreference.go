@@ -462,7 +462,7 @@ func modelName(modelProviderName, modelName string) string {
 
 func (h *Handler) EnsureTriggerProvider(req router.Request, _ router.Response) error {
 	toolRef := req.Object.(*v1.ToolReference)
-	if toolRef.Spec.Type != types.ToolReferenceTypeModelProvider || toolRef.Status.Tool == nil {
+	if toolRef.Spec.Type != types.ToolReferenceTypeTriggerProvider || toolRef.Status.Tool == nil {
 		return nil
 	}
 

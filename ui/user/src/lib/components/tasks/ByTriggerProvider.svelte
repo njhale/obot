@@ -1,5 +1,7 @@
 <script lang="ts">
-	import type { Task } from '$lib/services';
+	import type { Task, TriggerProvider } from '$lib/services';
+	import { ChatService } from '$lib/services';
+	import { onMount } from 'svelte';
 
 	interface Props {
 		task: Task;
@@ -8,23 +10,31 @@
 	}
 
 	let { task, editMode = false, onChanged }: Props = $props();
+	let providers: TriggerProvider[] = $state([]);
+
+	onMount(async () => {
+		providers = await ChatService.listTriggerProviders();
+	});
 
 	async function updateProvider(provider: string) {
-		if (!task.byTriggerProvider) {
-			task.byTriggerProvider = { provider };
-		} else {
-			task.byTriggerProvider.provider = provider;
-		}
-		await onChanged?.(task);
+		await onChanged?.({
+			...task,
+			byTriggerProvider: {
+				...(task.byTriggerProvider || {}),
+				provider
+			}
+		});
 	}
 
 	async function updateOptions(options: string) {
-		if (!task.byTriggerProvider) {
-			task.byTriggerProvider = { provider: '', options };
-		} else {
-			task.byTriggerProvider.options = options;
-		}
-		await onChanged?.(task);
+		await onChanged?.({
+			...task,
+			byTriggerProvider: {
+				...(task.byTriggerProvider || {}),
+				provider: task.byTriggerProvider?.provider || '',
+				options
+			}
+		});
 	}
 </script>
 
@@ -33,14 +43,17 @@
 	{#if editMode}
 		<div>
 			<label for="provider" class="text-sm font-medium">Provider</label>
-			<input
+			<select
 				id="provider"
-				type="text"
 				class="mt-1 w-full rounded-md border p-2"
-				placeholder="Provider name"
 				value={task.byTriggerProvider?.provider ?? ''}
-				oninput={(e) => updateProvider(e.currentTarget.value)}
-			/>
+				on:change={(e) => updateProvider(e.currentTarget.value)}
+			>
+				<option value="">Select a provider</option>
+				{#each providers as provider}
+					<option value={provider.name}>{provider.name}</option>
+				{/each}
+			</select>
 		</div>
 		<div>
 			<label for="options" class="text-sm font-medium">Provider Options</label>
@@ -49,7 +62,7 @@
 				class="mt-1 w-full rounded-md border p-2"
 				placeholder="Provider options (JSON)"
 				value={task.byTriggerProvider?.options ?? ''}
-				oninput={(e) => updateOptions(e.currentTarget.value)}
+				on:input={(e) => updateOptions(e.currentTarget.value)}
 			></textarea>
 		</div>
 	{:else if task.byTriggerProvider}

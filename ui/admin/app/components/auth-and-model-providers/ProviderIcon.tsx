@@ -1,6 +1,6 @@
 import { BoxesIcon } from "lucide-react";
 
-import { AuthProvider, ModelProvider } from "~/lib/model/providers";
+import { AuthProvider, ModelProvider, TriggerProvider } from "~/lib/model/providers";
 import { cn } from "~/lib/utils";
 
 import { useTheme } from "~/components/theme";
@@ -9,7 +9,7 @@ export function ProviderIcon({
 	provider,
 	size = "md",
 }: {
-	provider: ModelProvider | AuthProvider;
+	provider: ModelProvider | AuthProvider | TriggerProvider;
 	size?: "md" | "lg";
 }) {
 	const { isDark } = useTheme();

@@ -125,14 +125,22 @@
 			<button
 				class="ml-2 flex items-center rounded-3xl p-2 px-4 text-gray hover:bg-gray-70 hover:text-black dark:hover:bg-gray-900 dark:hover:text-gray-50"
 				class:hidden={!inputVisible}
-				onclick={() => {
+				onclick={async () => {
 					if (!task) {
 						return;
 					}
-					onChanged?.({
+					// First ensure we preserve any existing onDemand state
+					const currentOnDemand = task.onDemand || {};
+					const currentParams = currentOnDemand.params || {};
+					
+					await onChanged?.({
 						...task,
 						onDemand: {
-							params: { '': '' }
+							...currentOnDemand,
+							params: {
+								...currentParams,
+								'': ''  // Add the new empty parameter
+							}
 						}
 					});
 				}}
