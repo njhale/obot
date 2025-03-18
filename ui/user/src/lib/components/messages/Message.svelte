@@ -1,6 +1,6 @@
 <script lang="ts">
 	import MessageIcon from '$lib/components/messages/MessageIcon.svelte';
-	import { FileText, Pencil } from 'lucide-svelte/icons';
+	import { FileText, Pencil, Copy, Edit } from 'lucide-svelte/icons';
 	import { Tween } from 'svelte/motion';
 	import { ChatService, type Message, type Project } from '$lib/services';
 	import highlight from 'highlight.js';
@@ -16,6 +16,7 @@
 	interface Props {
 		msg: Message;
 		project: Project;
+		currentThreadID: string | undefined;
 		onLoadFile?: (filename: string) => void;
 		onSendCredentials?: (id: string, credentials: Record<string, string>) => void;
 		onSendCredentialsCancel?: (id: string) => void;
@@ -24,6 +25,7 @@
 	let {
 		msg,
 		project,
+		currentThreadID,
 		onLoadFile = () => {},
 		onSendCredentials = ChatService.sendCredentials,
 		onSendCredentialsCancel
@@ -181,6 +183,35 @@
 			return formatted;
 		} catch (_error) {
 			return jsonString;
+		}
+	}
+
+	async function copyContentToClipboard() {
+		try {
+			await navigator.clipboard.writeText(content);
+		} catch (err) {
+			console.error('Failed to copy message:', err);
+		}
+	}
+
+	async function openContentInEditor() {
+		try {
+			const filename = `obot-response-${msg.time?.getTime()}.md`;
+			const files = await ChatService.listFiles(project.assistantID, project.id, {
+				threadID: currentThreadID
+			});
+
+			const fileExists = files.items.some((file) => file.name === filename);
+			if (!fileExists) {
+				const file = new File([content], filename, { type: 'text/plain' });
+				await ChatService.saveFile(project.assistantID, project.id, file, {
+					threadID: currentThreadID
+				});
+			}
+
+			onLoadFile(filename);
+		} catch (err) {
+			console.error('Failed to create or open file:', err);
 		}
 	}
 </script>
@@ -479,8 +510,37 @@
 				{#if msg.sent}
 					{@render time()}
 				{/if}
+
+				{#if !msg.sent && msg.done && !msg.toolCall && msg.time && !animating}
+					{@const copyTT = popover({ hover: true, placement: 'bottom' })}
+					{@const editTT = popover({ hover: true, placement: 'bottom' })}
+					<div class="ml-2 mt-2 flex gap-2">
+						<div>
+							<button
+								use:copyTT.ref
+								class="icon-button-small"
+								onclick={() => copyContentToClipboard()}
+							>
+								<Copy class="h-4 w-4" />
+							</button>
+							<p use:copyTT.tooltip class="tooltip">Copy message to clipboard</p>
+						</div>
+
+						<div>
+							<button
+								use:editTT.ref
+								class="icon-button-small"
+								onclick={() => openContentInEditor()}
+							>
+								<Edit class="h-4 w-4" />
+							</button>
+							<p use:editTT.tooltip class="tooltip">Open message in editor</p>
+						</div>
+					</div>
+				{/if}
 			{/if}
 		</div>
+
 		{#if msg.aborted}
 			<div
 				class="pointer-events-none absolute bottom-0 z-10 flex h-full w-full flex-col items-center justify-center bg-white bg-opacity-60 text-xl font-semibold text-black text-opacity-30 dark:bg-black dark:bg-opacity-60 dark:text-white dark:text-opacity-30"
