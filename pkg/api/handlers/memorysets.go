@@ -28,6 +28,7 @@ func (h *MemorySetHandler) AddMemories(req api.Context) error {
 		memories  []types.Memory
 	)
 
+	// TODO(njhale): Use project_id and not the thread for scope?
 	thread, err := getThreadForScope(req)
 	if err != nil {
 		return err
@@ -105,7 +106,12 @@ func (h *MemorySetHandler) AddMemories(req api.Context) error {
 	}
 
 	// Convert the map back to a list for the response
-	return req.Write(memorySet)
+	return req.Write(&types.MemorySet{
+		Metadata: types.Metadata{
+			ID: memorySet.Name,
+		},
+		MemorySetManifest: memorySet.Spec.Manifest,
+	})
 }
 
 func (h *MemorySetHandler) GetMemories(req api.Context) error {
