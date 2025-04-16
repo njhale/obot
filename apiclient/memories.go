@@ -43,15 +43,3 @@ func (c *Client) GetMemories(ctx context.Context, assistantID, projectID string)
 
 	return &result, nil
 }
-
-// DeleteMemories deletes all memories for a project
-func (c *Client) DeleteMemories(ctx context.Context, assistantID, projectID string) error {
-	url := fmt.Sprintf("/assistants/%s/projects/%s/memories", assistantID, projectID)
-
-	_, _, err := c.doRequest(ctx, http.MethodDelete, url, nil)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}

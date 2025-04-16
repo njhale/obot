@@ -1,5 +1,6 @@
 <script lang="ts">
 	import MessageIcon from '$lib/components/messages/MessageIcon.svelte';
+	import MessageMemories from '$lib/components/messages/Memories.svelte';
 	import { FileText, Pencil, Copy, Edit, Info, X } from 'lucide-svelte/icons';
 	import { Tween } from 'svelte/motion';
 	import { ChatService, type Message, type Project } from '$lib/services';
@@ -62,6 +63,29 @@
 	let animating = $state(false);
 	let showToolInputDetails = $state(false);
 	let showToolOutputDetails = $state(false);
+
+	// Check if this is an Add Memory message
+	let isMemoryTool = $derived(
+		msg.sourceName === 'Add Memory' ||
+			msg.toolCall?.name?.toLowerCase() === 'addmemory' ||
+			msg.toolCall?.name?.toLowerCase() === 'add_memory'
+	);
+
+	// Get memory content from the message
+	let memoryContent = $derived(() => {
+		if (!isMemoryTool) return '';
+
+		try {
+			if (msg.toolCall?.input) {
+				const input = JSON.parse(msg.toolCall.input);
+				return input.content || '';
+			}
+		} catch (e) {
+			return '';
+		}
+
+		return '';
+	});
 
 	$effect(() => {
 		if (!shouldAnimate) return;
@@ -251,12 +275,18 @@
 		{/if}
 
 		{#if (msg.toolCall?.input || msg.toolCall?.output) && !msg.file}
-			<button
-				class="text-gray cursor-pointer text-xs underline"
-				onclick={() => (showToolInputDetails = !showToolInputDetails)}
-			>
-				{showToolInputDetails ? 'Hide' : 'Show'} Details
-			</button>
+			<div class="flex items-center gap-2">
+				<button
+					class="text-gray cursor-pointer text-xs underline"
+					onclick={() => (showToolInputDetails = !showToolInputDetails)}
+				>
+					{showToolInputDetails ? 'Hide' : 'Show'} Details
+				</button>
+
+				{#if isMemoryTool}
+					<MessageMemories {project} {memoryContent} />
+				{/if}
+			</div>
 		{/if}
 	</div>
 {/snippet}

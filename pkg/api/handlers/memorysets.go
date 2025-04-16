@@ -9,20 +9,17 @@ import (
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 type MemorySetHandler struct {
-	client kclient.Client
 }
 
-func NewMemorySetHandler(client kclient.Client) *MemorySetHandler {
-	return &MemorySetHandler{
-		client: client,
-	}
+func NewMemorySetHandler() *MemorySetHandler {
+	return &MemorySetHandler{}
 }
 
-func (h *MemorySetHandler) AddMemories(req api.Context) error {
+func (*MemorySetHandler) AddMemories(req api.Context) error {
 	var (
 		memorySet v1.MemorySet
 		memories  []types.Memory
@@ -114,7 +111,7 @@ func (h *MemorySetHandler) AddMemories(req api.Context) error {
 	})
 }
 
-func (h *MemorySetHandler) GetMemories(req api.Context) error {
+func (*MemorySetHandler) GetMemories(req api.Context) error {
 	var memorySet v1.MemorySet
 	thread, err := getThreadForScope(req)
 	if err != nil {
@@ -133,20 +130,44 @@ func (h *MemorySetHandler) GetMemories(req api.Context) error {
 	})
 }
 
-func (h *MemorySetHandler) DeleteMemories(req api.Context) error {
+func (*MemorySetHandler) DeleteMemories(req api.Context) error {
 	thread, err := getThreadForScope(req)
 	if err != nil {
 		return err
 	}
 
-	if err := req.Delete(&v1.MemorySet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      thread.Name,
-			Namespace: req.Namespace(),
-		},
-	}); err != nil {
+	// Check if a specific memory_id is provided
+	memoryID := req.PathValue("memory_id")
+	if memoryID == "" {
+		// No memory_id provided, delete the entire memory set
+		return req.Delete(&v1.MemorySet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      thread.Name,
+				Namespace: req.Namespace(),
+			},
+		})
+	}
+
+	// Memory ID provided, delete just that specific memory
+	var memorySet v1.MemorySet
+	if err := req.Get(&memorySet, thread.Name); err != nil {
 		return err
 	}
 
-	return nil
+	// Create a new slice without the memory to delete
+	var updatedMemories []types.Memory
+	for _, memory := range memorySet.Spec.Manifest.Memories {
+		if memory.ID == memoryID {
+			continue
+		}
+		updatedMemories = append(updatedMemories, memory)
+	}
+
+	if len(updatedMemories) == len(memorySet.Spec.Manifest.Memories) {
+		return apierrors.NewNotFound(schema.GroupResource{}, memoryID)
+	}
+
+	// Update the memory set with the filtered memories
+	memorySet.Spec.Manifest.Memories = updatedMemories
+	return req.Update(&memorySet)
 }

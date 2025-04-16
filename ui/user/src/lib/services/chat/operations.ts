@@ -27,7 +27,9 @@ import {
 	type ProjectShare,
 	type ToolReferenceList,
 	type SlackConfig,
-	type SlackReceiver
+	type SlackReceiver,
+	type Memory,
+	type MemorySet
 } from './types';
 
 export type Fetcher = typeof fetch;
@@ -912,4 +914,37 @@ export async function getProjectSlack(assistantID: string, projectID: string) {
 
 export async function disableProjectSlack(assistantID: string, projectID: string) {
 	return doDelete(`/assistants/${assistantID}/projects/${projectID}/slack`);
+}
+
+export async function getMemories(assistantID: string, projectID: string): Promise<MemorySet> {
+	const response = (await doGet(`/assistants/${assistantID}/projects/${projectID}/memories`, {
+		dontLogErrors: true
+	})) as any;
+
+	// Handle different possible response structures
+	let memories: Memory[] = [];
+	if (response?.MemorySetManifest?.memories) {
+		memories = response.MemorySetManifest.memories;
+	} else if (response?.memories) {
+		memories = response.memories;
+	} else if (Array.isArray(response)) {
+		memories = response;
+	}
+
+	return {
+		id: response?.Metadata?.id || response?.id || '',
+		memories: memories || []
+	};
+}
+
+export async function deleteAllMemories(assistantID: string, projectID: string): Promise<void> {
+	await doDelete(`/assistants/${assistantID}/projects/${projectID}/memories`);
+}
+
+export async function deleteMemory(
+	assistantID: string,
+	projectID: string,
+	memoryID: string
+): Promise<void> {
+	await doDelete(`/assistants/${assistantID}/projects/${projectID}/memories/${memoryID}`);
 }
