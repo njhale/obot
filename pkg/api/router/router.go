@@ -37,6 +37,7 @@ func Router(services *services.Services) (http.Handler, error) {
 	projects := handlers.NewProjectsHandler(services.Router.Backend(), services.Invoker, services.GPTClient)
 	projectShare := handlers.NewProjectShareHandler()
 	files := handlers.NewFilesHandler(services.GPTClient)
+	memories := handlers.NewMemorySetHandler(services.Router.Backend())
 	workflows := handlers.NewWorkflowHandler(services.GPTClient, services.ServerURL, services.Invoker)
 	slackEventHandler := handlers.NewSlackEventHandler(services.GPTClient)
 	sendgridWebhookHandler := sendgrid.NewInboundWebhookHandler(services.StorageClient, services.EmailServerName, services.SendgridWebhookUsername, services.SendgridWebhookPassword)
@@ -209,6 +210,11 @@ func Router(services *services.Services) (http.Handler, error) {
 	// Project Tables
 	mux.HandleFunc("GET /api/assistants/{assistant_id}/projects/{project_id}/tables", tables.ListTables)
 	mux.HandleFunc("GET /api/assistants/{assistant_id}/projects/{project_id}/tables/{table_name}/rows", tables.GetRows)
+
+	// Project Memories
+	mux.HandleFunc("POST /api/assistants/{assistant_id}/projects/{project_id}/memories", memories.AddMemories)
+	mux.HandleFunc("GET /api/assistants/{assistant_id}/projects/{project_id}/memories", memories.GetMemories)
+	mux.HandleFunc("DELETE /api/assistants/{assistant_id}/projects/{project_id}/memories", memories.DeleteMemories)
 
 	// Agent files
 	mux.HandleFunc("GET /api/agents/{id}/file/{file...}", agents.GetFile)
