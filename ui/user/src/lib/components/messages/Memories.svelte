@@ -1,9 +1,10 @@
 <script lang="ts">
-	import { type Project, getMemories } from '$lib/services';
+	import { type Project } from '$lib/services';
 	import { hasTool } from '$lib/tools';
 	import { getProjectTools } from '$lib/context/projectTools.svelte';
 	import { tooltip } from '$lib/actions/tooltip.svelte';
 	import { Save } from 'lucide-svelte/icons';
+	import { showDialog } from '$lib/components/MemoriesDialog.svelte';
 
 	interface Props {
 		project: Project;
@@ -14,11 +15,7 @@
 	const projectTools = getProjectTools();
 
 	function openMemoriesDialog() {
-		// Find the memories dialog component in the sidebar and open it
-		const memoriesBtn = document.querySelector('[data-memories-btn]') as HTMLButtonElement;
-		if (memoriesBtn) {
-			memoriesBtn.click();
-		}
+		showDialog(project);
 	}
 </script>
 

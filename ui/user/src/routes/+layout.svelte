@@ -4,6 +4,7 @@
 	import Notifications from '$lib/components/Notifications.svelte';
 	import ReLoginDialog from '$lib/components/ReLoginDialog.svelte';
 	import SuccessNotifications from '$lib/components/SuccessNotifications.svelte';
+	import MemoriesDialog from '$lib/components/MemoriesDialog.svelte';
 
 	interface Props {
 		children?: import('svelte').Snippet;
@@ -57,3 +58,4 @@
 <Notifications />
 <SuccessNotifications />
 <ReLoginDialog />
+<MemoriesDialog />
