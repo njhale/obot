@@ -1,15 +1,3 @@
-<script lang="ts" context="module">
-	// Shared reference to the dialog component for external access
-	let dialogInstance: any;
-
-	// Export a function that can be imported by other components
-	export function showDialog(project: Project) {
-		if (dialogInstance) {
-			dialogInstance.open(project);
-		}
-	}
-</script>
-
 <script lang="ts">
 	import {
 		type Project,
@@ -22,27 +10,22 @@
 	import { fade } from 'svelte/transition';
 	import { tooltip } from '$lib/actions/tooltip.svelte';
 	import errors from '$lib/stores/errors.svelte';
-	import { onMount } from 'svelte';
 
+	interface Props {
+		project?: Project;
+	}
+
+	let { project = $bindable() }: Props = $props();
 	let dialog = $state<HTMLDialogElement>();
 	let memories = $state<Memory[]>([]);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
-	let currentProject = $state<Project | null>(null);
 
-	// Store a reference to this component instance
-	onMount(() => {
-		dialogInstance = {
-			open: (project: Project) => {
-				currentProject = project;
-				dialog?.showModal();
-				loadMemories();
-			}
-		};
-	});
+	export function show(projectToUse?: Project) {
+		if (projectToUse) {
+			project = projectToUse;
+		}
 
-	function open(project: Project) {
-		currentProject = project;
 		dialog?.showModal();
 		loadMemories();
 	}
@@ -52,12 +35,12 @@
 	}
 
 	async function loadMemories() {
-		if (!currentProject) return;
+		if (!project) return;
 
 		loading = true;
 		error = null;
 		try {
-			const result = await getMemories(currentProject.assistantID, currentProject.id);
+			const result = await getMemories(project.assistantID, project.id);
 			memories = result.memories || [];
 		} catch (err) {
 			// Ignore 404 errors (memory tool not configured or no memories)
@@ -74,7 +57,7 @@
 	}
 
 	async function deleteAll() {
-		if (!currentProject) return;
+		if (!project) return;
 		if (!confirm('Are you sure you want to delete all memories?')) {
 			return;
 		}
@@ -82,7 +65,7 @@
 		loading = true;
 		error = null;
 		try {
-			await deleteAllMemories(currentProject.assistantID, currentProject.id);
+			await deleteAllMemories(project.assistantID, project.id);
 			memories = [];
 		} catch (err) {
 			errors.append(err);
@@ -93,12 +76,12 @@
 	}
 
 	async function deleteOne(memoryId: string) {
-		if (!currentProject) return;
+		if (!project) return;
 
 		loading = true;
 		error = null;
 		try {
-			await deleteMemory(currentProject.assistantID, currentProject.id, memoryId);
+			await deleteMemory(project.assistantID, project.id, memoryId);
 			memories = memories.filter((memory) => memory.id !== memoryId);
 		} catch (err) {
 			errors.append(err);
@@ -114,7 +97,7 @@
 		try {
 			const date = new Date(dateString);
 			return date.toLocaleString();
-		} catch (e) {
+		} catch (_e) {
 			return '';
 		}
 	}

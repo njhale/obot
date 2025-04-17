@@ -1,6 +1,5 @@
 <script lang="ts">
 	import MessageIcon from '$lib/components/messages/MessageIcon.svelte';
-	import MessageMemories from '$lib/components/messages/Memories.svelte';
 	import { FileText, Pencil, Copy, Edit, Info, X } from 'lucide-svelte/icons';
 	import { Tween } from 'svelte/motion';
 	import { ChatService, type Message, type Project } from '$lib/services';
@@ -14,6 +13,10 @@
 	import { overflowToolTip } from '$lib/actions/overflow';
 	import { tooltip } from '$lib/actions/tooltip.svelte';
 	import { ABORTED_BY_USER_MESSAGE, ABORTED_THREAD_MESSAGE } from '$lib/constants';
+	import { Save } from 'lucide-svelte/icons';
+	import { hasTool } from '$lib/tools';
+	import { getProjectTools } from '$lib/context/projectTools.svelte';
+	import MemoriesDialog from '$lib/components/MemoriesDialog.svelte';
 
 	interface Props {
 		msg: Message;
@@ -70,22 +73,6 @@
 			msg.toolCall?.name?.toLowerCase() === 'addmemory' ||
 			msg.toolCall?.name?.toLowerCase() === 'add_memory'
 	);
-
-	// Get memory content from the message
-	let memoryContent = $derived(() => {
-		if (!isMemoryTool) return '';
-
-		try {
-			if (msg.toolCall?.input) {
-				const input = JSON.parse(msg.toolCall.input);
-				return input.content || '';
-			}
-		} catch (e) {
-			return '';
-		}
-
-		return '';
-	});
 
 	$effect(() => {
 		if (!shouldAnimate) return;
@@ -252,6 +239,9 @@
 			console.error('Failed to create or open file:', err);
 		}
 	}
+
+	const projectTools = getProjectTools();
+	let memoriesDialog = $state<ReturnType<typeof MemoriesDialog>>();
 </script>
 
 {#snippet time()}
@@ -283,8 +273,15 @@
 					{showToolInputDetails ? 'Hide' : 'Show'} Details
 				</button>
 
-				{#if isMemoryTool}
-					<MessageMemories {project} {memoryContent} />
+				{#if isMemoryTool && hasTool(projectTools.tools, 'memory')}
+					<button
+						class="text-gray flex cursor-pointer items-center gap-1 text-xs underline"
+						onclick={() => memoriesDialog?.show()}
+						use:tooltip={'Open memories'}
+					>
+						<Save class="h-3 w-3" />
+						Memories
+					</button>
 				{/if}
 			</div>
 		{/if}
@@ -639,6 +636,8 @@
 		</div>
 	</div>
 {/if}
+
+<MemoriesDialog bind:this={memoriesDialog} {project} />
 
 <style lang="postcss">
 	/* The :global is to get rid of warnings about the selector not being found */

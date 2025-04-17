@@ -5,7 +5,6 @@
 	import Clone from '$lib/components/navbar/Clone.svelte';
 	import { hasTool } from '$lib/tools';
 	import Credentials from '$lib/components/navbar/Credentials.svelte';
-	import Memories from '$lib/components/navbar/Memories.svelte';
 	import Tasks from '$lib/components/sidebar/Tasks.svelte';
 	import { getLayout } from '$lib/context/layout.svelte';
 	import Projects from './navbar/Projects.svelte';
@@ -13,6 +12,7 @@
 	import Tables from '$lib/components/sidebar/Tables.svelte';
 	import { tooltip } from '$lib/actions/tooltip.svelte';
 	import { getProjectTools } from '$lib/context/projectTools.svelte';
+	import MemoriesDialog from '$lib/components/MemoriesDialog.svelte';
 
 	interface Props {
 		project: Project;
@@ -21,7 +21,7 @@
 
 	let { project, currentThreadID = $bindable() }: Props = $props();
 	let credentials = $state<ReturnType<typeof Credentials>>();
-	let memories = $state<ReturnType<typeof Memories>>();
+	let memories = $state<ReturnType<typeof MemoriesDialog>>();
 	let projectsOpen = $state(false);
 	const layout = getLayout();
 	const projectTools = getProjectTools();
@@ -83,7 +83,7 @@
 		{/if}
 
 		<Credentials bind:this={credentials} {project} />
-		<Memories bind:this={memories} {project} />
+		<MemoriesDialog bind:this={memories} {project} />
 		{#if !project.editor}
 			<Clone {project} />
 		{/if}

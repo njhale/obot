@@ -919,7 +919,12 @@ export async function disableProjectSlack(assistantID: string, projectID: string
 export async function getMemories(assistantID: string, projectID: string): Promise<MemorySet> {
 	const response = (await doGet(`/assistants/${assistantID}/projects/${projectID}/memories`, {
 		dontLogErrors: true
-	})) as any;
+	})) as {
+		MemorySetManifest?: { memories?: Memory[] };
+		Metadata?: { id?: string };
+		memories?: Memory[];
+		id?: string;
+	};
 
 	// Handle different possible response structures
 	let memories: Memory[] = [];
@@ -928,7 +933,7 @@ export async function getMemories(assistantID: string, projectID: string): Promi
 	} else if (response?.memories) {
 		memories = response.memories;
 	} else if (Array.isArray(response)) {
-		memories = response;
+		memories = response as Memory[];
 	}
 
 	return {
