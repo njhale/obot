@@ -23,7 +23,7 @@
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 	let toDeleteAll = $state(false);
-	let editingMemoryId = $state<string | null>(null);
+	let editingMemoryIndex = $state<number | null>(null);
 	let editContent = $state('');
 
 	export function show(projectToUse?: Project) {
@@ -78,14 +78,14 @@
 		}
 	}
 
-	async function deleteOne(memoryId: string) {
+	async function deleteOne(index: number) {
 		if (!project) return;
 
 		loading = true;
 		error = null;
 		try {
-			await deleteMemory(project.assistantID, project.id, memoryId);
-			memories = memories.filter((memory) => memory.id !== memoryId);
+			await deleteMemory(project.assistantID, project.id, index.toString());
+			memories = memories.filter((_, i) => i !== index);
 		} catch (err) {
 			errors.append(err);
 			error = 'Failed to delete memory';
@@ -94,18 +94,18 @@
 		}
 	}
 
-	function startEdit(memory: Memory) {
-		editingMemoryId = memory.id;
+	function startEdit(memory: Memory, index: number) {
+		editingMemoryIndex = index;
 		editContent = memory.content;
 	}
 
 	function cancelEdit() {
-		editingMemoryId = null;
+		editingMemoryIndex = null;
 		editContent = '';
 	}
 
 	async function saveEdit() {
-		if (!project || !editingMemoryId) return;
+		if (!project || editingMemoryIndex === null) return;
 
 		loading = true;
 		error = null;
@@ -113,12 +113,12 @@
 			const updatedMemory = await updateMemory(
 				project.assistantID,
 				project.id,
-				editingMemoryId,
+				editingMemoryIndex.toString(),
 				editContent
 			);
 			// Update the memory in the list
-			memories = memories.map((memory) => (memory.id === editingMemoryId ? updatedMemory : memory));
-			editingMemoryId = null;
+			memories = memories.map((memory, i) => (i === editingMemoryIndex ? updatedMemory : memory));
+			editingMemoryIndex = null;
 			editContent = '';
 		} catch (err) {
 			errors.append(err);
@@ -193,7 +193,7 @@
 							</tr>
 						</thead>
 						<tbody>
-							{#each memories as memory (memory.id)}
+							{#each memories as memory, index (index)}
 								<tr class="border-surface3 group hover:bg-surface2 border-b">
 									<td class="text-text2 py-3 pr-4 text-xs whitespace-nowrap"
 										>{formatDate(memory.createdAt)}</td
@@ -201,7 +201,7 @@
 									<td
 										class="text-text1 max-w-[450px] py-3 pr-4 text-sm break-words break-all hyphens-auto"
 									>
-										{#if editingMemoryId === memory.id}
+										{#if editingMemoryIndex === index}
 											<textarea
 												bind:value={editContent}
 												class="border-surface3 bg-surface2 text-text1 min-h-[80px] w-full rounded border p-2"
@@ -212,7 +212,7 @@
 										{/if}
 									</td>
 									<td class="py-3 whitespace-nowrap">
-										{#if editingMemoryId === memory.id}
+										{#if editingMemoryIndex === index}
 											<div class="flex gap-2">
 												<button
 													class="icon-button text-green-500"
@@ -233,7 +233,7 @@
 											<div class="flex gap-2">
 												<button
 													class="icon-button"
-													onclick={() => startEdit(memory)}
+													onclick={() => startEdit(memory, index)}
 													disabled={loading}
 													use:tooltip={'Edit memory'}
 												>
@@ -241,7 +241,7 @@
 												</button>
 												<button
 													class="icon-button"
-													onclick={() => deleteOne(memory.id)}
+													onclick={() => deleteOne(index)}
 													disabled={loading}
 													use:tooltip={'Delete memory'}
 												>

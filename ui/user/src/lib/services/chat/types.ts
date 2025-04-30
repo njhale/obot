@@ -465,9 +465,8 @@ export interface SlackReceiver {
 }
 
 export interface Memory {
-	id: string;
 	content: string;
-	createdAt: string;
+	createdAt?: string;
 }
 
 export interface MemoryList {
