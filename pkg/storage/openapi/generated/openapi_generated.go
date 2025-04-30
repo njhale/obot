@@ -2487,12 +2487,6 @@ func schema_obot_platform_obot_apiclient_types_Memory(ref common.ReferenceCallba
 				Description: "Memory represents a single memory item",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
-					"id": {
-						SchemaProps: spec.SchemaProps{
-							Type:   []string{"string"},
-							Format: "",
-						},
-					},
 					"content": {
 						SchemaProps: spec.SchemaProps{
 							Type:   []string{"string"},
