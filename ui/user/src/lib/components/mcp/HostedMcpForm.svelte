@@ -3,6 +3,7 @@
 	import { Plus, Trash2 } from 'lucide-svelte';
 	import InfoTooltip from '$lib/components/InfoTooltip.svelte';
 	import SensitiveInput from '$lib/components/SensitiveInput.svelte';
+	import { onMount } from 'svelte';
 
 	interface Props {
 		config: MCPServerInfo;
@@ -16,6 +17,62 @@
 			node.focus();
 		}
 	}
+
+	// Function to extract variables from arguments containing ${VAR} patterns
+	function extractAndAddEnvVars() {
+		if (!config.env) return;
+
+		// Regular expression to match ${VARIABLE_NAME}
+		const varRegex = /\${([A-Za-z0-9_]+)}/g;
+		const varsToAdd = new Set<string>();
+
+		// Check command for variables
+		if (config.command) {
+			let match;
+			const commandCopy = config.command;
+			while ((match = varRegex.exec(commandCopy)) !== null) {
+				varsToAdd.add(match[1]);
+			}
+		}
+
+		// Check each argument for variables
+		if (config.args) {
+			config.args.forEach((arg) => {
+				let match;
+				const argCopy = arg;
+				while ((match = varRegex.exec(argCopy)) !== null) {
+					varsToAdd.add(match[1]);
+				}
+			});
+		}
+
+		// Add missing variables as required environment variables
+		varsToAdd.forEach((varName) => {
+			// Check if the variable already exists in the environment
+			const exists = config.env?.some((env) => env.key === varName);
+			if (!exists) {
+				config.env?.push({
+					name: varName,
+					key: varName,
+					description: `Required for command/argument with \${${varName}}`,
+					sensitive: true,
+					required: true,
+					file: false,
+					value: ''
+				});
+			}
+		});
+	}
+
+	// Watch for changes to arguments and command, then extract variables
+	$effect(() => {
+		extractAndAddEnvVars();
+	});
+
+	// Run extraction on component mount for existing values
+	onMount(() => {
+		extractAndAddEnvVars();
+	});
 </script>
 
 {#if config.env}
@@ -86,7 +143,11 @@
 
 <div class="flex items-center gap-4">
 	<h4 class="text-base font-semibold">Command</h4>
-	<input class="text-input-filled w-full" bind:value={config.command} />
+	<input
+		class="text-input-filled w-full"
+		bind:value={config.command}
+		oninput={extractAndAddEnvVars}
+	/>
 </div>
 
 {#if config.args}
@@ -95,7 +156,11 @@
 		<div class="flex grow flex-col gap-4">
 			{#each config.args as _arg, i}
 				<div class="flex items-center gap-2">
-					<input class="text-input-filled w-full" bind:value={config.args[i]} />
+					<input
+						class="text-input-filled w-full"
+						bind:value={config.args[i]}
+						oninput={extractAndAddEnvVars}
+					/>
 					<button class="icon-button" onclick={() => config.args?.splice(i, 1)}>
 						<Trash2 class="size-4" />
 					</button>
@@ -105,7 +170,10 @@
 			<div class="flex justify-end">
 				<button
 					class="button flex items-center gap-1 text-xs"
-					onclick={() => config.args?.push('')}
+					onclick={() => {
+						config.args?.push('');
+						setTimeout(extractAndAddEnvVars, 0);
+					}}
 				>
 					<Plus class="size-4" /> Argument
 				</button>
