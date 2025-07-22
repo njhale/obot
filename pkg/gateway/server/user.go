@@ -215,7 +215,13 @@ func (s *Server) listAuthGroups(apiContext api.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to get auth provider URL: %v", err)
 		}
-		groups, err := apiContext.GatewayClient.ListAuthGroups(apiContext.Context(), providerURL.String(), namespace, name, apiContext.URL.Query().Get("name"))
+		groups, err := apiContext.GatewayClient.ListAuthGroups(
+			apiContext.Context(),
+			providerURL.String(),
+			namespace,
+			name,
+			apiContext.URL.Query().Get("name"),
+		)
 		if err != nil {
 			return fmt.Errorf("failed to list auth groups: %v", err)
 		}

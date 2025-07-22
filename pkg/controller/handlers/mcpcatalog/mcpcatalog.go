@@ -20,7 +20,6 @@ import (
 	"github.com/obot-platform/obot/logger"
 	"github.com/obot-platform/obot/pkg/controller/handlers/accesscontrolrule"
 	gclient "github.com/obot-platform/obot/pkg/gateway/client"
-	gtypes "github.com/obot-platform/obot/pkg/gateway/types"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -322,12 +321,12 @@ func (h *Handler) DeleteUnauthorizedMCPServers(req router.Request, _ router.Resp
 			continue
 		}
 
-		userInfo, gatewayUser, err := h.getUserInfoForAccessControl(req.Ctx, server.Spec.UserID)
+		user, err := h.getUserInfoForAccessControl(req.Ctx, server.Spec.UserID)
 		if err != nil {
 			return fmt.Errorf("failed to get user info for %s: %w", server.Spec.UserID, err)
 		}
 
-		if gatewayUser.Role.HasRole(types.RoleAdmin) {
+		if user.role.HasRole(types.RoleAdmin) {
 			// Don't delete servers created by admins.
 			continue
 		}
@@ -341,7 +340,7 @@ func (h *Handler) DeleteUnauthorizedMCPServers(req router.Request, _ router.Resp
 			continue
 		}
 
-		hasAccess, err := h.accessControlRuleHelper.UserHasAccessToMCPServerCatalogEntry(userInfo, server.Spec.MCPServerCatalogEntryName)
+		hasAccess, err := h.accessControlRuleHelper.UserHasAccessToMCPServerCatalogEntry(user, server.Spec.MCPServerCatalogEntryName)
 		if err != nil {
 			return fmt.Errorf("failed to check if user %s has access to catalog entry %s: %w", server.Spec.UserID, server.Spec.MCPServerCatalogEntryName, err)
 		}
@@ -381,17 +380,17 @@ func (h *Handler) DeleteUnauthorizedMCPServerInstances(req router.Request, _ rou
 			continue
 		}
 
-		userInfo, gatewayUser, err := h.getUserInfoForAccessControl(req.Ctx, instance.Spec.UserID)
+		user, err := h.getUserInfoForAccessControl(req.Ctx, instance.Spec.UserID)
 		if err != nil {
 			return fmt.Errorf("failed to get user %s: %w", instance.Spec.UserID, err)
 		}
 
-		if gatewayUser.Role.HasRole(types.RoleAdmin) {
+		if user.role.HasRole(types.RoleAdmin) {
 			// Don't delete instances created by admins.
 			continue
 		}
 
-		hasAccess, err := h.accessControlRuleHelper.UserHasAccessToMCPServer(userInfo, instance.Spec.MCPServerName)
+		hasAccess, err := h.accessControlRuleHelper.UserHasAccessToMCPServer(user, instance.Spec.MCPServerName)
 		if err != nil {
 			return fmt.Errorf("failed to check if user %s has access to MCP server %s: %w", instance.Spec.UserID, instance.Spec.MCPServerName, err)
 		}
@@ -407,42 +406,35 @@ func (h *Handler) DeleteUnauthorizedMCPServerInstances(req router.Request, _ rou
 	return nil
 }
 
+// userInfo is a wrapper around kuser.Info that includes the user's role.
+type userInfo struct {
+	kuser.Info
+	role types.Role
+}
+
 // getUserInfoForAccessControl gets user info needed for access control checks
-func (h *Handler) getUserInfoForAccessControl(ctx context.Context, userID string) (kuser.Info, *gtypes.User, error) {
+func (h *Handler) getUserInfoForAccessControl(ctx context.Context, userID string) (*userInfo, error) {
 	gatewayUser, err := h.gatewayClient.UserByID(ctx, userID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get user %s: %w", userID, err)
+		return nil, fmt.Errorf("failed to get user %s: %w", userID, err)
 	}
 
-	// Get identities for this user - there should only be one active identity at a time
-	identities, err := h.gatewayClient.FindIdentitiesForUser(ctx, gatewayUser.ID)
+	// Get all provider auth groups for the user.
+	groupIDs, err := h.gatewayClient.ListGroupIDsForUser(ctx, gatewayUser.ID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get identities: %w", err)
+		return nil, fmt.Errorf("failed to list user group IDs: %w", err)
 	}
 
-	var (
-		groupIDs                                []string
-		authProviderName, authProviderNamespace string
-	)
-	for _, identity := range identities {
-		authProviderName = identity.AuthProviderName
-		authProviderNamespace = identity.AuthProviderNamespace
-
-		for _, group := range identity.AuthProviderGroups {
-			groupIDs = append(groupIDs, group.ID)
-		}
-	}
-
-	userInfo := &kuser.DefaultInfo{
-		Name:   gatewayUser.Username,
-		UID:    fmt.Sprintf("%d", gatewayUser.ID),
-		Groups: []string{},
-		Extra: map[string][]string{
-			"auth_provider_groups":    groupIDs,
-			"auth_provider_name":      {authProviderName},
-			"auth_provider_namespace": {authProviderNamespace},
+	return &userInfo{
+		Info: &kuser.DefaultInfo{
+			Name:   gatewayUser.Username,
+			UID:    fmt.Sprintf("%d", gatewayUser.ID),
+			Groups: []string{},
+			Extra: map[string][]string{
+				// Omit the auth provider namespace and name since groupIDs may include groups from multiple auth providers.
+				"auth_provider_groups": groupIDs,
+			},
 		},
-	}
-
-	return userInfo, gatewayUser, nil
+		role: gatewayUser.Role,
+	}, nil
 }

@@ -28,7 +28,8 @@ type Group struct {
 
 // GroupMemberships represents an identity's membership in a group.
 type GroupMemberships struct {
-	IdentityHashedProviderUserID string `json:"identityHashedProviderUserID" gorm:"primaryKey"`
+	// UserID is the ID of the user that is a member of the group.
+	UserID uint `json:"userID" gorm:"primaryKey"`
 
 	// GroupID is the globally unique identifier for the group.
 	GroupID string `json:"groupID" gorm:"primaryKey"`
