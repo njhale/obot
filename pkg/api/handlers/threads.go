@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/pkg/api"
@@ -31,21 +32,25 @@ func NewThreadHandler(dispatcher *dispatcher.Dispatcher, events *events.Emitter)
 	}
 }
 
+const templateSnapshotAnnotation = "obot.obot.ai/projectSnapshotRevision"
+
 func convertTemplateThread(thread v1.Thread, share *v1.ThreadShare) types.ProjectTemplate {
 	template := types.ProjectTemplate{
-		Metadata: MetadataFrom(&thread),
-		ProjectTemplateManifest: types.ProjectTemplateManifest{
-			Name: thread.Spec.Manifest.Name,
-		},
+		Metadata:        MetadataFrom(&thread),
 		ProjectSnapshot: thread.Spec.Manifest,
 		AssistantID:     thread.Spec.AgentName,
 		ProjectID:       strings.Replace(thread.Spec.SourceThreadName, system.ThreadPrefix, system.ProjectPrefix, 1),
 		Ready:           thread.Status.Created,
 	}
 
+	// Populate ProjectSnapshotRevision from annotation if present
+	if ts := thread.Annotations[templateSnapshotAnnotation]; ts != "" {
+		if parsed, err := time.Parse(time.RFC3339, ts); err == nil {
+			template.ProjectSnapshotRevision = *types.NewTime(parsed)
+		}
+	}
+
 	if share != nil {
-		template.Featured = share.Spec.Featured
-		template.Public = share.Spec.Manifest.Public
 		template.PublicID = share.Spec.PublicID
 		template.MCPServers = share.Status.MCPServers
 	}

@@ -9,6 +9,7 @@ type Project struct {
 	SourceProjectID              string                       `json:"sourceProjectID,omitempty"`
 	UserID                       string                       `json:"userID,omitempty"`
 	WorkflowNamesFromIntegration WorkflowNamesFromIntegration `json:"workflowNamesFromIntegration,omitempty"`
+	SnapshotUpgradeAvailable     bool                         `json:"snapshotUpgradeAvailable,omitempty"`
 }
 
 type WorkflowNamesFromIntegration struct {

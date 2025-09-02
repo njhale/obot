@@ -247,6 +247,50 @@ func (h *ProjectsHandler) GetProject(req api.Context) error {
 	return req.Write(convertProject(&thread, nil))
 }
 
+func (h *ProjectsHandler) TemplateUpgrade(req api.Context) error {
+	var (
+		projectID = strings.Replace(req.PathValue("project_id"), system.ProjectPrefix, system.ThreadPrefix, 1)
+		thread    v1.Thread
+	)
+
+	if err := req.Get(&thread, projectID); err != nil {
+		return err
+	}
+
+	if thread.Spec.SourceThreadName == "" || !thread.Spec.Project {
+		return types.NewErrBadRequest("project was not created from a template")
+	}
+
+	// Get the source thread to verify it's a template
+	var source v1.Thread
+	if err := req.Get(&source, thread.Spec.SourceThreadName); err != nil {
+		return err
+	}
+
+	// Verify the source is actually a template
+	if !source.Spec.Template {
+		return types.NewErrBadRequest("source project is not a template")
+	}
+
+	if thread.Annotations == nil {
+		thread.Annotations = map[string]string{}
+	}
+	// Copy snapshot revision annotation from source template if present
+	if ts := source.Annotations[templateSnapshotAnnotation]; ts != "" {
+		thread.Annotations[templateSnapshotAnnotation] = ts
+	}
+
+	// Persist annotation updates first
+	if err := req.Update(&thread); err != nil {
+		return err
+	}
+
+	// Reset copy status flags to trigger controller to re-copy tools and MCP servers
+	thread.Status.CopiedTools = false
+	thread.Status.CopiedTasks = false
+	return req.Storage.Status().Update(req.Context(), &thread)
+}
+
 func (h *ProjectsHandler) ListProjects(req api.Context) error {
 	var (
 		assistantID = req.PathValue("assistant_id")
@@ -475,6 +519,9 @@ func convertProject(thread *v1.Thread, parentThread *v1.Thread) types.Project {
 	if parentThread != nil {
 		p.Tools = append(p.Tools, parentThread.Spec.Manifest.Tools...)
 	}
+
+	// Expose upgrade availability derived in controller status
+	p.SnapshotUpgradeAvailable = thread.Status.SnapshotUpgradeAvailable
 
 	p.Type = "project"
 	p.ID = strings.Replace(p.ID, system.ThreadPrefix, system.ProjectPrefix, 1)

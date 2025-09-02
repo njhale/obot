@@ -91,6 +91,7 @@ func (c *Controller) setupRoutes() {
 	root.Type(&v1.Thread{}).HandlerFunc(threads.CreateSharedWorkspace)
 	root.Type(&v1.Thread{}).HandlerFunc(threads.CreateKnowledgeSet)
 	root.Type(&v1.Thread{}).HandlerFunc(threads.WorkflowState)
+	root.Type(&v1.Thread{}).HandlerFunc(threads.SnapshotUpgradeStatus)
 	root.Type(&v1.Thread{}).HandlerFunc(knowledgesummary.Summarize)
 	root.Type(&v1.Thread{}).HandlerFunc(threads.CleanupEphemeralThreads)
 	root.Type(&v1.Thread{}).HandlerFunc(threads.GenerateName)
@@ -101,6 +102,7 @@ func (c *Controller) setupRoutes() {
 	root.Type(&v1.Thread{}).HandlerFunc(threads.SetCreated)
 	root.Type(&v1.Thread{}).HandlerFunc(threads.SlackCapability)
 	root.Type(&v1.Thread{}).HandlerFunc(taskHandler.HandleTaskCreationForCapabilities)
+	root.Type(&v1.Thread{}).HandlerFunc(threads.EnsureTemplateThreadShare)
 	root.Type(&v1.Thread{}).HandlerFunc(threads.RemoveOldFinalizers)
 	root.Type(&v1.Thread{}).FinalizeFunc(v1.ThreadFinalizer, credentialCleanup.Remove)
 

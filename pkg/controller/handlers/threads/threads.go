@@ -7,10 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/gptscript-ai/go-gptscript"
 	"github.com/obot-platform/nah/pkg/name"
 	"github.com/obot-platform/nah/pkg/randomtoken"
 	"github.com/obot-platform/nah/pkg/router"
+	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/pkg/create"
 	"github.com/obot-platform/obot/pkg/invoke"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
@@ -19,6 +22,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+const templateSnapshotAnnotation = "obot.obot.ai/projectSnapshotRevision"
 
 type Handler struct {
 	gptScript *gptscript.GPTScript
@@ -42,6 +47,31 @@ func (t *Handler) WorkflowState(req router.Request, _ router.Response) error {
 		thread.Status.WorkflowState = wfe.Status.State
 	}
 
+	return nil
+}
+
+// SnapshotUpgradeStatus sets SnapshotUpgradeAvailable when a project created from a template has a newer template snapshot.
+func (t *Handler) SnapshotUpgradeStatus(req router.Request, _ router.Response) error {
+	thread := req.Object.(*v1.Thread)
+	if !thread.Spec.Project || thread.Spec.SourceThreadName == "" {
+		return nil
+	}
+
+	var source v1.Thread
+	if err := req.Client.Get(req.Ctx, router.Key(thread.Namespace, thread.Spec.SourceThreadName), &source); err != nil {
+		return err
+	}
+	if !source.Spec.Template {
+		return nil
+	}
+
+	srcRev := source.Annotations[templateSnapshotAnnotation]
+	projRev := thread.Annotations[templateSnapshotAnnotation]
+	desired := srcRev != "" && projRev != srcRev
+	if thread.Status.SnapshotUpgradeAvailable != desired {
+		thread.Status.SnapshotUpgradeAvailable = desired
+		return req.Client.Status().Update(req.Ctx, thread)
+	}
 	return nil
 }
 
@@ -316,6 +346,38 @@ func (t *Handler) SetCreated(req router.Request, _ router.Response) error {
 	return req.Client.Update(req.Ctx, thread)
 }
 
+// EnsureTemplateThreadShare ensures a public ThreadShare exists for template threads
+func (t *Handler) EnsureTemplateThreadShare(req router.Request, _ router.Response) error {
+	thread := req.Object.(*v1.Thread)
+	if !thread.Spec.Template {
+		return nil
+	}
+	// Create the share if it doesn't exist
+	var share v1.ThreadShare
+	if err := req.Client.Get(req.Ctx, router.Key(thread.Namespace, thread.Name), &share); err == nil {
+		return nil
+	} else if !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	publicID := strings.ReplaceAll(uuid.New().String(), "-", "")
+	share = v1.ThreadShare{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      thread.Name,
+			Namespace: thread.Namespace,
+		},
+		Spec: v1.ThreadShareSpec{
+			UserID:            thread.Spec.UserID,
+			ProjectThreadName: thread.Name,
+			Template:          true,
+			Featured:          false,
+			Manifest:          types.ProjectShareManifest{Public: true},
+			PublicID:          publicID,
+		},
+	}
+	return req.Client.Create(req.Ctx, &share)
+}
+
 func (t *Handler) CleanupEphemeralThreads(req router.Request, _ router.Response) error {
 	thread := req.Object.(*v1.Thread)
 	if !thread.Spec.Ephemeral ||
@@ -462,27 +524,180 @@ func (t *Handler) CopyToolsFromSource(req router.Request, _ router.Response) err
 		}
 	}
 
-	var mcpList v1.MCPServerList
-	if err := req.Client.List(req.Ctx, &mcpList, kclient.InNamespace(thread.Namespace), kclient.MatchingFields{
+	var projectMcpList v1.ProjectMCPServerList
+	if err := req.Client.List(req.Ctx, &projectMcpList, kclient.InNamespace(thread.Namespace), kclient.MatchingFields{
 		"spec.threadName": thread.Spec.SourceThreadName,
 	}); err != nil {
 		return err
 	}
 
-	for _, mcp := range mcpList.Items {
-		newMCP := v1.MCPServer{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:       name.SafeHashConcatName(mcp.Name, thread.Name),
-				Namespace:  thread.Namespace,
-				Finalizers: []string{v1.MCPServerFinalizer},
-			},
-			Spec: mcp.Spec,
-		}
-		newMCP.Spec.ThreadName = thread.Name
-		newMCP.Spec.UserID = thread.Spec.UserID
+	// Track desired ProjectMCPServer names for pruning obsolete ones later
+	desiredPMSNames := map[string]struct{}{}
 
-		if err := create.IfNotExists(req.Ctx, req.Client, &newMCP); err != nil {
+	for _, projectMcp := range projectMcpList.Items {
+		// Determine the per-user target MCP backend to point to in the new project
+		targetMCPID := projectMcp.Spec.Manifest.MCPID
+
+		// Case 1: Source points to an MCPServerInstance -> create/update a per-thread instance pointing to the same server
+		if system.IsMCPServerInstanceID(projectMcp.Spec.Manifest.MCPID) {
+			var srcInst v1.MCPServerInstance
+			if err := req.Client.Get(req.Ctx, router.Key(thread.Namespace, projectMcp.Spec.Manifest.MCPID), &srcInst); err != nil {
+				return err
+			}
+
+			newInstName := name.SafeHashConcatName(system.MCPServerInstancePrefix, thread.Name, srcInst.Spec.MCPServerName)
+			desiredInst := v1.MCPServerInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       newInstName,
+					Namespace:  thread.Namespace,
+					Finalizers: []string{v1.MCPServerInstanceFinalizer},
+				},
+				Spec: v1.MCPServerInstanceSpec{
+					UserID:                    thread.Spec.UserID,
+					MCPServerName:             srcInst.Spec.MCPServerName,
+					MCPCatalogName:            srcInst.Spec.MCPCatalogName,
+					MCPServerCatalogEntryName: srcInst.Spec.MCPServerCatalogEntryName,
+				},
+			}
+			var existingInst v1.MCPServerInstance
+			if err := req.Client.Get(req.Ctx, router.Key(thread.Namespace, newInstName), &existingInst); apierrors.IsNotFound(err) {
+				if err := req.Client.Create(req.Ctx, &desiredInst); err != nil {
+					return err
+				}
+			} else if err != nil {
+				return err
+			} else {
+				existingInst.Spec = desiredInst.Spec
+				if err := req.Client.Update(req.Ctx, &existingInst); err != nil {
+					return err
+				}
+			}
+			targetMCPID = newInstName
+		} else if system.IsMCPServerID(projectMcp.Spec.Manifest.MCPID) {
+			// Case 2: Source points directly to an MCPServer
+			var srcServer v1.MCPServer
+			if err := req.Client.Get(req.Ctx, router.Key(thread.Namespace, projectMcp.Spec.Manifest.MCPID), &srcServer); err != nil {
+				return err
+			}
+
+			if srcServer.Spec.SharedWithinMCPCatalogName != "" {
+				// Shared (multi-user) server -> create/update a per-thread instance pointing to it
+				newInstName := name.SafeHashConcatName(system.MCPServerInstancePrefix, thread.Name, srcServer.Name)
+				desiredInst := v1.MCPServerInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       newInstName,
+						Namespace:  thread.Namespace,
+						Finalizers: []string{v1.MCPServerInstanceFinalizer},
+					},
+					Spec: v1.MCPServerInstanceSpec{
+						UserID:                    thread.Spec.UserID,
+						MCPServerName:             srcServer.Name,
+						MCPCatalogName:            srcServer.Spec.SharedWithinMCPCatalogName,
+						MCPServerCatalogEntryName: srcServer.Spec.MCPServerCatalogEntryName,
+					},
+				}
+				var existingInst v1.MCPServerInstance
+				if err := req.Client.Get(req.Ctx, router.Key(thread.Namespace, newInstName), &existingInst); apierrors.IsNotFound(err) {
+					if err := req.Client.Create(req.Ctx, &desiredInst); err != nil {
+						return err
+					}
+				} else if err != nil {
+					return err
+				} else {
+					existingInst.Spec = desiredInst.Spec
+					if err := req.Client.Update(req.Ctx, &existingInst); err != nil {
+						return err
+					}
+				}
+				targetMCPID = newInstName
+			} else {
+				// Single-user server
+				if srcServer.Spec.UserID == thread.Spec.UserID {
+					// Already owned by this user; reuse it
+					targetMCPID = srcServer.Name
+				} else {
+					// Clone a new per-user MCPServer by copying the manifest
+					newServerName := name.SafeHashConcatName(system.MCPServerPrefix, thread.Name, srcServer.Name)
+					desiredServer := v1.MCPServer{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:       newServerName,
+							Namespace:  thread.Namespace,
+							Finalizers: []string{v1.MCPServerFinalizer},
+						},
+						Spec: v1.MCPServerSpec{
+							Manifest:                   srcServer.Spec.Manifest,
+							UnsupportedTools:           srcServer.Spec.UnsupportedTools,
+							ThreadName:                 "",
+							Alias:                      srcServer.Spec.Alias,
+							UserID:                     thread.Spec.UserID,
+							SharedWithinMCPCatalogName: "",
+							MCPServerCatalogEntryName:  srcServer.Spec.MCPServerCatalogEntryName,
+						},
+					}
+					var existingServer v1.MCPServer
+					if err := req.Client.Get(req.Ctx, router.Key(thread.Namespace, newServerName), &existingServer); apierrors.IsNotFound(err) {
+						if err := req.Client.Create(req.Ctx, &desiredServer); err != nil {
+							return err
+						}
+					} else if err != nil {
+						return err
+					} else {
+						existingServer.Spec = desiredServer.Spec
+						if err := req.Client.Update(req.Ctx, &existingServer); err != nil {
+							return err
+						}
+					}
+					targetMCPID = newServerName
+				}
+			}
+		}
+
+		// Create the project-scoped mapping pointing to the new per-user backend
+		newManifest := projectMcp.Spec.Manifest
+		newManifest.MCPID = targetMCPID
+
+		newPMSName := name.SafeHashConcatName(system.ProjectMCPServerPrefix, thread.Name, projectMcp.Name)
+		desiredPMS := v1.ProjectMCPServer{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       newPMSName,
+				Namespace:  thread.Namespace,
+				Finalizers: []string{v1.ProjectMCPServerFinalizer},
+			},
+			Spec: v1.ProjectMCPServerSpec{
+				Manifest:   newManifest,
+				ThreadName: thread.Name,
+				UserID:     thread.Spec.UserID,
+			},
+		}
+		var existingPMS v1.ProjectMCPServer
+		if err := req.Client.Get(req.Ctx, router.Key(thread.Namespace, newPMSName), &existingPMS); apierrors.IsNotFound(err) {
+			if err := req.Client.Create(req.Ctx, &desiredPMS); err != nil {
+				return err
+			}
+		} else if err != nil {
 			return err
+		} else {
+			existingPMS.Spec = desiredPMS.Spec
+			if err := req.Client.Update(req.Ctx, &existingPMS); err != nil {
+				return err
+			}
+		}
+		// Mark as desired
+		desiredPMSNames[newPMSName] = struct{}{}
+	}
+
+	// Prune ProjectMCPServers that are no longer desired for this thread
+	var existingPMSList v1.ProjectMCPServerList
+	if err := req.Client.List(req.Ctx, &existingPMSList, kclient.InNamespace(thread.Namespace), kclient.MatchingFields{
+		"spec.threadName": thread.Name,
+	}); err != nil {
+		return err
+	}
+	for _, pms := range existingPMSList.Items {
+		if _, keep := desiredPMSNames[pms.Name]; !keep {
+			if err := req.Client.Delete(req.Ctx, &pms); err != nil && !apierrors.IsNotFound(err) {
+				return err
+			}
 		}
 	}
 

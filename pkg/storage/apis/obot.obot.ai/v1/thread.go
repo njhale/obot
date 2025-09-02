@@ -190,6 +190,7 @@ type ThreadStatus struct {
 	Created             bool   `json:"created,omitempty"`
 	// WorkflowNamesFromIntegration is the workflow names created from external integration, like slack, discord..
 	WorkflowNamesFromIntegration types.WorkflowNamesFromIntegration `json:"workflowNamesFromIntegration,omitempty"`
+	SnapshotUpgradeAvailable     bool                               `json:"snapshotUpgradeAvailable,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

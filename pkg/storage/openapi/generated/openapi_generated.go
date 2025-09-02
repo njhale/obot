@@ -135,7 +135,6 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/obot-platform/obot/apiclient/types.ProjectShareManifest":                         schema_obot_platform_obot_apiclient_types_ProjectShareManifest(ref),
 		"github.com/obot-platform/obot/apiclient/types.ProjectTemplate":                              schema_obot_platform_obot_apiclient_types_ProjectTemplate(ref),
 		"github.com/obot-platform/obot/apiclient/types.ProjectTemplateList":                          schema_obot_platform_obot_apiclient_types_ProjectTemplateList(ref),
-		"github.com/obot-platform/obot/apiclient/types.ProjectTemplateManifest":                      schema_obot_platform_obot_apiclient_types_ProjectTemplateManifest(ref),
 		"github.com/obot-platform/obot/apiclient/types.Prompt":                                       schema_obot_platform_obot_apiclient_types_Prompt(ref),
 		"github.com/obot-platform/obot/apiclient/types.PromptResponse":                               schema_obot_platform_obot_apiclient_types_PromptResponse(ref),
 		"github.com/obot-platform/obot/apiclient/types.ProviderConfigurationParameter":               schema_obot_platform_obot_apiclient_types_ProviderConfigurationParameter(ref),
@@ -5834,6 +5833,12 @@ func schema_obot_platform_obot_apiclient_types_Project(ref common.ReferenceCallb
 							Ref:     ref("github.com/obot-platform/obot/apiclient/types.WorkflowNamesFromIntegration"),
 						},
 					},
+					"snapshotUpgradeAvailable": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"boolean"},
+							Format: "",
+						},
+					},
 				},
 				Required: []string{"Metadata", "ProjectManifest", "editor"},
 			},
@@ -6398,16 +6403,15 @@ func schema_obot_platform_obot_apiclient_types_ProjectTemplate(ref common.Refere
 							Ref:     ref("github.com/obot-platform/obot/apiclient/types.Metadata"),
 						},
 					},
-					"ProjectTemplateManifest": {
-						SchemaProps: spec.SchemaProps{
-							Default: map[string]interface{}{},
-							Ref:     ref("github.com/obot-platform/obot/apiclient/types.ProjectTemplateManifest"),
-						},
-					},
 					"projectSnapshot": {
 						SchemaProps: spec.SchemaProps{
 							Default: map[string]interface{}{},
 							Ref:     ref("github.com/obot-platform/obot/apiclient/types.ThreadManifest"),
+						},
+					},
+					"projectSnapshotRevision": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref("github.com/obot-platform/obot/apiclient/types.Time"),
 						},
 					},
 					"mcpServers": {
@@ -6449,11 +6453,11 @@ func schema_obot_platform_obot_apiclient_types_ProjectTemplate(ref common.Refere
 						},
 					},
 				},
-				Required: []string{"Metadata", "ProjectTemplateManifest"},
+				Required: []string{"Metadata"},
 			},
 		},
 		Dependencies: []string{
-			"github.com/obot-platform/obot/apiclient/types.Metadata", "github.com/obot-platform/obot/apiclient/types.ProjectTemplateManifest", "github.com/obot-platform/obot/apiclient/types.ThreadManifest"},
+			"github.com/obot-platform/obot/apiclient/types.Metadata", "github.com/obot-platform/obot/apiclient/types.ThreadManifest", "github.com/obot-platform/obot/apiclient/types.Time"},
 	}
 }
 
@@ -6482,36 +6486,6 @@ func schema_obot_platform_obot_apiclient_types_ProjectTemplateList(ref common.Re
 		},
 		Dependencies: []string{
 			"github.com/obot-platform/obot/apiclient/types.ProjectTemplate"},
-	}
-}
-
-func schema_obot_platform_obot_apiclient_types_ProjectTemplateManifest(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Type: []string{"object"},
-				Properties: map[string]spec.Schema{
-					"name": {
-						SchemaProps: spec.SchemaProps{
-							Type:   []string{"string"},
-							Format: "",
-						},
-					},
-					"public": {
-						SchemaProps: spec.SchemaProps{
-							Type:   []string{"boolean"},
-							Format: "",
-						},
-					},
-					"featured": {
-						SchemaProps: spec.SchemaProps{
-							Type:   []string{"boolean"},
-							Format: "",
-						},
-					},
-				},
-			},
-		},
 	}
 }
 
@@ -15048,6 +15022,12 @@ func schema_storage_apis_obotobotai_v1_ThreadStatus(ref common.ReferenceCallback
 							Description: "WorkflowNamesFromIntegration is the workflow names created from external integration, like slack, discord..",
 							Default:     map[string]interface{}{},
 							Ref:         ref("github.com/obot-platform/obot/apiclient/types.WorkflowNamesFromIntegration"),
+						},
+					},
+					"snapshotUpgradeAvailable": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"boolean"},
+							Format: "",
 						},
 					},
 				},
