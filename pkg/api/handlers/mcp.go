@@ -2030,6 +2030,7 @@ func (m *MCPHandler) GetServerDetails(req api.Context) error {
 		mcpServerDisplayName = server.Name
 	}
 
+	// TODO(njhale): Aggregate server details for composite MCP servers.
 	details, err := m.mcpSessionManager.GetServerDetails(req.Context(), mcpServerDisplayName, server.Name, serverConfig)
 	if err != nil {
 		if nse := (*mcp.ErrNotSupportedByBackend)(nil); errors.As(err, &nse) {

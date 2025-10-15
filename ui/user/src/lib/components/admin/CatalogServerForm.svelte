@@ -26,10 +26,10 @@
 		id?: string;
 		entity?: 'workspace' | 'catalog';
 		entry?: MCPCatalogEntry | MCPCatalogServer;
-		type?: 'single' | 'multi' | 'remote';
+		type?: 'single' | 'multi' | 'remote' | 'composite';
 		readonly?: boolean;
 		onCancel?: () => void;
-		onSubmit?: (id: string, type: 'single' | 'multi' | 'remote') => void;
+		onSubmit?: (id: string, type: 'single' | 'multi' | 'remote' | 'composite') => void;
 		hideTitle?: boolean;
 		readonlyMessage?: Snippet;
 	}

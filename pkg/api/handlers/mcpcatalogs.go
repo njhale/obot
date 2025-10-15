@@ -661,9 +661,12 @@ func (h *MCPCatalogHandler) GetServerFromEntry(req api.Context) error {
 // GenerateToolPreviews launches a temporary instance of an MCP server from a catalog entry
 // to generate tool preview data, then cleans up the instance.
 func (h *MCPCatalogHandler) GenerateToolPreviews(req api.Context) error {
-	catalogName := req.PathValue("catalog_id")
-	workspaceID := req.PathValue("workspace_id")
-	entryName := req.PathValue("entry_id")
+	var (
+		catalogName = req.PathValue("catalog_id")
+		workspaceID = req.PathValue("workspace_id")
+		entryName   = req.PathValue("entry_id")
+		dryRun      = req.Request.URL.Query().Get("dryRun") == "true"
+	)
 
 	// Verify the scope exists
 	if catalogName != "" {
@@ -691,7 +694,7 @@ func (h *MCPCatalogHandler) GenerateToolPreviews(req api.Context) error {
 		return types.NewErrBadRequest("entry does not belong to workspace")
 	}
 
-	if !entry.Spec.Editable {
+	if !dryRun && !entry.Spec.Editable {
 		return types.NewErrBadRequest("entry is not editable")
 	}
 
@@ -730,8 +733,13 @@ func (h *MCPCatalogHandler) GenerateToolPreviews(req api.Context) error {
 		return fmt.Errorf("failed to launch temporary instance: %w", err)
 	}
 
-	// Update the catalog entry with the tool preview
+	// Set the tool preview on the catalog entry
 	entry.Spec.Manifest.ToolPreview = toolPreviews
+	if dryRun {
+		// Don't update the entry, just return the entry with the new tool set
+		return req.Write(convertMCPServerCatalogEntry(entry))
+	}
+
 	if err := req.Update(&entry); err != nil {
 		return fmt.Errorf("failed to update catalog entry: %w", err)
 	}

@@ -39,7 +39,7 @@
 	import { profile } from '$lib/stores';
 	import OverflowContainer from '../OverflowContainer.svelte';
 
-	type MCPType = 'single' | 'multi' | 'remote';
+	type MCPType = 'single' | 'multi' | 'remote' | 'composite';
 
 	interface Props {
 		id?: string;

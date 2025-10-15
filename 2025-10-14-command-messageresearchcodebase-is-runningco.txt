@@ -1,0 +1,801 @@
+
+ ▐▛███▜▌   Claude Code v2.0.15
+▝▜█████▛▘  Sonnet 4.5 · Claude Pro
+  ▘▘ ▝▝    /Users/nick/projects/obot-platform/obot
+
+> /agents 
+  ⎿  Agents dialog dismissed
+
+> /research_codebase is running… I'm trying to come up with a low-level design for the strawman 
+described by @outline.md, but I first need a detailed, low-level, understanding of how 
+@pkg/api/handlers/mcpgateway/ works. I need a detailed walkthrough of how MCP servers are created 
+and deployed, as well as how connections to them are authorized and proxied. I need you to start 
+with initially creating an MCP server from a CatalogEntry, and a trace for how it's started and the
+ connections/clients are managed. I'm especially interested in how sessions and tokens tie together
+ with connections and oauth. 
+  ⎿  Read outline.md (83 lines)
+  ⎿  Listed directory pkg/api/handlers/mcpgateway/
+
+⏺ I'll help you understand the detailed low-level workings of the MCP gateway system. Let me
+  start by reading the outline and then researching the codebase.
+
+⏺ Good, I've read the outline. Now let me locate the mcpgateway files and start researching the
+   architecture:
+
+⏺ Search(pattern: "**/mcpgateway/**/*.go")
+  ⎿  Found 12 files (ctrl+o to expand)
+
+⏺ Search(pattern: "**/mcp*.go", path: "pkg/api/handlers")
+  ⎿  Found 6 files (ctrl+o to expand)
+
+⏺ Search(pattern: "type.*Gateway.*struct", type: "go", output_mode: "content")
+  ⎿  Found 0 lines 
+
+⏺ Read(pkg/api/handlers/mcpgateway/handler.go)
+  ⎿  Read 515 lines
+
+⏺ Read(pkg/api/handlers/mcp.go)
+  ⎿  Error: File content (30447 tokens) exceeds maximum allowed tokens (25000). Please use offset 
+     and limit parameters to read specific portions of the file, or use the GrepTool to search for 
+     specific content.
+
+⏺ Read(pkg/api/handlers/mcpcatalogs.go)
+  ⎿  Read 908 lines
+
+⏺ Let me read the mcp.go file in sections to understand server creation, and also read the
+  session management and OAuth files:
+
+⏺ Read(pkg/api/handlers/mcp.go)
+  ⎿  Read 500 lines
+
+⏺ Read(pkg/api/handlers/mcpgateway/sessionstore.go)
+  ⎿  Read 178 lines
+
+⏺ Read(pkg/api/handlers/mcpgateway/tokenstore.go)
+  ⎿  Read 73 lines
+
+⏺ Read(pkg/api/handlers/mcpgateway/oauth/handler.go)
+  ⎿  Read 48 lines
+
+⏺ Let me now spawn parallel research tasks to deeply analyze the architecture:
+
+⏺ codebase-analyzer(Analyze MCP server creation flow)
+  ⎿  Done (15 tool uses · 66.7k tokens · 2m 27s)                                              
+
+⏺ codebase-analyzer(Analyze session manager startup)
+  ⎿  Done (18 tool uses · 62.8k tokens · 2m 21s)                                              
+
+⏺ codebase-analyzer(Analyze OAuth and token flow)
+  ⎿  Done (33 tool uses · 60.5k tokens · 2m 48s)                                              
+
+⏺ codebase-analyzer(Analyze gateway connection flow)
+  ⎿  Done (17 tool uses · 44.0k tokens · 3m 19s)                                              
+
+⏺ Excellent! I've completed comprehensive research on how the MCP gateway system works. Let me
+  now mark all the research tasks complete and provide you with a detailed walkthrough based on
+   the findings.
+
+⏺ Perfect! Now let me provide you with a comprehensive walkthrough of the MCP gateway
+  architecture. Based on my deep research, here's how MCP servers are created, deployed, and
+  how connections are managed:
+
+  ---
+  MCP Gateway Architecture: Complete Low-Level Walkthrough
+
+  1. Creating an MCP Server from a CatalogEntry
+
+  API Flow: User Creates MCP Server
+
+  Endpoint: POST /api/mcp-servers
+
+  When a user wants to connect to an MCP server from a catalog:
+
+  1. Request arrives at pkg/api/handlers/mcp.go:1105 (CreateServer handler)
+  2. Reads request body containing {"catalogEntryID": "entry-xyz", "alias": "My Server", ...}
+  3. Fetches the catalog entry from storage (v1.MCPServerCatalogEntry)
+  4. Performs ACR check to verify user has access to this catalog entry
+  5. Converts catalog entry manifest to server manifest via types.MapCatalogEntryToServer() at
+  apiclient/types/mcpserver.go:244
+    - For NPX runtime: Creates NPXRuntimeConfig with package name
+    - For UVX runtime: Creates UVXRuntimeConfig with package name
+    - For Containerized: Creates ContainerizedRuntimeConfig with image/command/port
+    - For Remote: Creates RemoteRuntimeConfig with URL (supports templates like ${API_KEY})
+  6. Creates v1.MCPServer Kubernetes resource with:
+  MCPServer{
+    Spec: {
+      Manifest: <converted manifest>,
+      UserID: <current user>,
+      MCPServerCatalogEntryName: "entry-xyz",
+      MCPCatalogID: <if multi-user>,
+      PowerUserWorkspaceID: <if workspace-scoped>
+    }
+  }
+
+  Key Data Structures
+
+  v1.MCPServer (pkg/storage/apis/obot.obot.ai/v1/mcpserver.go:21):
+  - Contains the full server manifest (command, args, env vars, runtime type)
+  - Scoped by UserID, MCPCatalogID, PowerUserWorkspaceID, or ThreadName
+  - Links back to catalog entry via MCPServerCatalogEntryName
+
+  mcp.ServerConfig (pkg/mcp/types.go:21):
+  - Runtime configuration created from MCPServer + credentials
+  - Contains expanded env vars, file credentials, connection details
+  - Created via mcp.ServerToServerConfig() at pkg/mcp/types.go:130
+
+  ---
+  2. Server Startup and Deployment
+
+  When a Connection is Made
+
+  Endpoint: GET /api/mcp-gateway/{mcp_id} (HTTP/SSE)
+
+  The gateway handler (pkg/api/handlers/mcpgateway/handler.go:79) processes the connection:
+
+  1. Resolves MCP server via ServerForActionWithConnectID at line 82
+  2. Creates messageContext containing user, server, config at line 106
+  3. Delegates to nanobot MCP HTTP server at line 115
+
+  SessionManager Creates/Reuses MCP Client
+
+  When OnMessage is called (line 128), it needs an MCP client:
+
+  Flow in pkg/mcp/client.go:24 (ClientForMCPServerWithOptions):
+
+  1. Generates deployment ID from config hash: "mcp" + hash(serverConfig)[:60]
+    - Same config = same deployment (enables sharing)
+  2. Calls backend's ensureServerDeployment which varies by runtime:
+
+  Backend-Specific Deployment
+
+  Local Backend (pkg/mcp/local.go):
+
+  - Supports: stdio (npx, uvx)
+  - Writes file credentials to /tmp/{deploymentID}/
+  - Returns config with command/args for direct execution
+  - No actual deployment (client spawns process on demand)
+
+  Docker Backend (pkg/mcp/docker.go:46):
+
+  - Supports: npx, uvx, containerized
+  - For NPX/UVX:
+    - Uses base nanobot image
+    - Creates volume with nanobot YAML config pointing to npx/uvx package
+    - Runs: nanobot run --listen-address :8099 /run/nanobot.yaml
+    - Nanobot spawns the actual MCP server subprocess
+  - For Containerized:
+    - Uses custom Docker image from manifest
+    - Directly runs the MCP server on configured port
+  - Creates Docker volumes for file-based credentials
+  - Health check: Polls /healthz (nanobot) or sends initialize message (containerized)
+  - Returns: http://localhost:{mapped-port} or container bridge IP
+
+  Kubernetes Backend (pkg/mcp/kubernetes.go:50):
+
+  - Supports: npx, uvx, containerized
+  - Creates resources:
+    - Secret {id}-files: Volume-mounted credential files
+    - Secret {id}-run: Nanobot config (NPX/UVX only)
+    - Secret {id}-config: Environment variables
+    - Deployment with 1 replica
+    - Service for stable DNS
+  - For NPX/UVX: Same nanobot wrapper approach as Docker
+  - For Containerized: Runs custom image directly
+  - Waits for pod ready: Checks deployment has 1 ready replica, then hits healthz
+  - Returns: http://{deployment-name}.{namespace}.svc.cluster.local
+
+  Client Caching
+
+  In pkg/mcp/loader.go:80 (loadSession):
+
+  The SessionManager maintains:
+  sessions: Map[deploymentID -> Map[clientScope -> *Client]]
+
+  - Multiple client scopes can share the same deployment
+  - Each scope gets its own nmcp.Client instance with isolated connection
+  - Client scope in gateway = session ID from Mcp-Session-Id header
+
+  ---
+  3. Connection Authorization and OAuth
+
+  Two-Level OAuth System
+
+  Level 1: Client → Obot (pkg/api/handlers/mcpgateway/oauth/)
+
+  1. Client discovers OAuth at GET /.well-known/oauth-authorization-server/mcp-connect/{mcp_id}
+  2. Client initiates flow at GET /oauth/authorize/{mcp_id}
+  3. Obot redirects user to authenticate (web UI login)
+  4. Callback at GET /oauth/callback/{oauth_auth_request}/{mcp_id}
+  5. Client exchanges code for token at POST /oauth/token/{mcp_id}
+    - Receives JWT access token (10 min expiration)
+    - Receives refresh token for renewal
+
+  Level 2: Obot → Backend MCP Server (oauth/mcpoauthhandler.go:41)
+
+  When connecting to a remote MCP server that requires OAuth:
+
+  1. Gateway creates MCP client with OAuth hooks at line 52:
+  ClientForMCPServerWithOptions(ctx, "Obot OAuth Check", mcpServer, config,
+    nmcp.ClientOption{
+      TokenStorage: tokenStore.ForUserAndMCP(userID, mcpID),
+      CallbackHandler: oauthHandler,
+      ClientCredLookup: oauthHandler,
+    }
+  )
+  2. MCP server responds with 401 + WWW-Authenticate header containing OAuth provider URL
+  3. Nanobot library calls HandleAuthURL which sends URL to channel
+  4. Gateway returns OAuth URL to first-level flow at oauth/authorize.go:332
+  5. User authenticates with third-party provider (e.g., Google, GitHub)
+  6. Callback at GET /oauth/mcp/callback exchanges code for token
+  7. Token stored in database via gatewayClient.ReplaceMCPOAuthToken()
+  8. Client retries connection, gateway now has token
+
+  Token Storage
+
+  Database table: MCPOAuthToken (pkg/gateway/types/tokens.go:35):
+
+  Composite key: (userID, mcpID)
+
+  Stored encrypted:
+  - AccessToken
+  - RefreshToken
+  - ClientID / ClientSecret
+  - OAuth State and Verifier (PKCE)
+
+  Token retrieval (pkg/api/handlers/mcpgateway/tokenstore.go:38):
+  func (t *tokenStore) GetTokenConfig(ctx, scope) (*oauth2.Config, *oauth2.Token, error) {
+    mcpToken := gatewayClient.GetMCPOAuthToken(ctx, t.userID, t.mcpID)
+    // Decrypts and returns oauth2.Token
+  }
+
+  Automatic refresh: Handled by golang.org/x/oauth2 library
+  - Checks token.Expiry
+  - Uses RefreshToken to get new AccessToken
+  - Calls SetTokenConfig to save updated token
+
+  ---
+  4. Sessions vs Tokens vs Connections
+
+  The Key Distinction
+
+  Connection (Client) = Process-level connection to MCP server
+  - Lives in SessionManager.sessions sync.Map
+  - Keyed by: deploymentID + clientScope
+  - Represents a nmcp.Client connected to the actual MCP server process/container
+  - Created once per deployment + scope combination
+  - Reused across multiple HTTP requests from same session
+
+  Session = User's conversation state with MCP server
+  - Stored as v1.MCPSession Kubernetes resource
+  - Keyed by: session ID (from Mcp-Session-Id header)
+  - Contains serialized nmcp.SessionState (initialization details, capabilities)
+  - Persists across connection drops
+  - Updated on every message exchange
+
+  Token = Authentication credential
+  - First-level tokens: JWT access token + refresh token for Client→Obot auth
+    - Stored in OAuthToken Kubernetes resource
+    - 10 minute expiration, refreshable
+  - Second-level tokens: OAuth token for Obot→Backend auth
+    - Stored in MCPOAuthToken database table
+    - Encrypted at rest
+    - Auto-refreshed by oauth2 library
+
+  Session Lifecycle
+
+  Initial connection (sessionstore.go:24):
+  1. Client sends request without Mcp-Session-Id
+  2. Nanobot creates new session with random ID
+  3. Gateway Store() saves to v1.MCPSession in Kubernetes
+  4. Response includes Mcp-Session-Id: {uuid} header
+  5. Client caches this ID for future requests
+
+  Subsequent requests (sessionstore.go:64):
+  1. Client includes Mcp-Session-Id: {uuid} header
+  2. Gateway Acquire() loads from cache or storage
+  3. Deserializes SessionState and reconstructs nmcp.ServerSession
+  4. Updates LastUsedTime hourly
+
+  Session cleanup (sessionstore.go:93):
+  1. Client disconnects or deletes session
+  2. Gateway LoadAndDelete() removes from caches
+  3. Deletes v1.MCPSession from Kubernetes
+  4. Connection to MCP server remains (may be reused by other sessions)
+
+  ---
+  5. Message Proxying and Request Handling
+
+  Client → Server Flow
+
+  Entry at handler.go:128 (OnMessage):
+
+  1. Extract context with user, server, HTTP request/response
+  2. Initialize audit log capturing:
+    - User ID, MCP ID, session ID, client IP
+    - Call type (tools/call, resources/read, etc.)
+    - Call identifier (tool/resource name)
+    - Request body, request headers
+  3. Fetch webhooks for this server/call type
+  4. Fire request webhooks (can block request if webhook fails)
+  5. Get MCP client via SessionManager.ClientForMCPServerWithOptions()
+    - Provides session ID as clientScope
+    - Includes TokenStorage for OAuth
+  6. Exchange message with MCP server:
+  client.Session.Exchange(ctx, msg.Method, &msg, &result)
+  7. Fire response webhooks (can inspect/modify result)
+  8. Reply to client via msg.Reply(ctx, result)
+  9. Complete audit log in deferred function:
+    - Captures processing time, response status, response body
+    - Persists to database with encryption
+
+  Server → Client Flow (Server-Initiated Messages)
+
+  Entry at clientmessagehandler.go:73 (onMessage):
+
+  1. Create message handler via asClientOption at line 20
+  2. Server sends message (e.g., elicitation request, sampling request)
+  3. Initialize audit log for server-initiated call
+  4. Fire request webhooks
+  5. Register pending request via pendingRequests.WaitFor(msg.ID)
+  6. Send to external client via session.Send(ctx, msg)
+  7. Wait for client response on channel
+  8. When response arrives:
+    - Comes back through OnMessage at handler.go:129
+    - pendingRequests.Notify(msg) returns true
+    - Message consumed by waiting goroutine
+  9. Fire response webhooks with client's answer
+  10. Return result to MCP server
+  11. Complete audit log
+
+  Pending Requests Mechanism
+
+  Prevents duplicate message delivery:
+  - pendingRequests is a sync.Map keyed by session ID
+  - Each session has a *nmcp.PendingRequests object
+  - When server sends message: WaitFor(msg.ID) creates channel
+  - When client responds: Notify(msg) sends on that channel
+  - If Notify returns true, message is consumed (don't forward again)
+
+  ---
+  6. Special Considerations for VMCP Design
+
+  Based on this architecture, here are key insights for implementing Virtual MCP (composite)
+  servers:
+
+  Deployment Strategy
+
+  Option 1: Composite Backend
+  - Create a new backend type that wraps multiple MCP clients
+  - SessionManager would create one "virtual deployment" that internally manages N real
+  deployments
+  - Pro: Fits existing architecture cleanly
+  - Con: Complex credential/OAuth management across components
+
+  Option 2: Proxy Layer
+  - Create a containerized MCP server that acts as a proxy/aggregator
+  - Deploy like any other containerized runtime
+  - Internally connects to component MCP servers
+  - Pro: Reuses existing deployment/connection logic
+  - Con: Requires new proxy implementation
+
+  Tool/Resource Name Transforms
+
+  The gateway currently uses the raw tool names from MCP servers. For VMCP:
+  - Need bidirectional name mapping: {vmcp_tool_name} ↔ {component_server}:{real_tool_name}
+  - Apply in OnMessage before calling Exchange() (client→server)
+  - Apply in result before calling Reply() (server→client)
+  - Store mappings in VMCP catalog entry manifest
+
+  Multi-Level OAuth
+
+  When VMCP has multiple component servers requiring OAuth:
+  - Need to track OAuth state per component: (userID, vmcpID, componentMCPID)
+  - CheckForMCPAuth would need to check all components
+  - Return combined OAuth URL or redirect through each provider sequentially
+  - TokenStore would need hierarchical structure
+
+  Session Management
+
+  Sessions are tied to single MCP server currently. For VMCP:
+  - Session state would need to track state per component server
+  - Could maintain N sub-sessions (one per component)
+  - Or create stateless VMCP proxy that doesn't need session storage
+
+  Audit Logging
+
+  Current design logs per-server. For VMCP:
+  - Top-level audit log for VMCP call
+  - Optional sub-audit logs for component server calls (hidden from user)
+  - Need to track which component server handled which tool call
+
+  ---
+  This should give you a comprehensive foundation for designing your Virtual MCP
+  implementation! The key architectural patterns to consider are the SessionManager's
+  deployment abstraction, the session vs connection distinction, and the two-level OAuth flow.
+
+> /export 
+  ⎿  Conversation exported to: 2025-10-14-command-messageresearchcodebase-is-runningco.txt
+
+> /context 
+  ⎿  Context Usage
+     ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛀ ⛁ ⛁   claude-sonnet-4-5-20250929 · 87k/200k tokens (43%)
+     ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ 
+     ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁   ⛁ System prompt: 2.2k tokens (1.1%)
+     ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁ ⛁   ⛁ System tools: 12.4k tokens (6.2%)
+     ⛁ ⛁ ⛁ ⛁ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   ⛁ Custom agents: 497 tokens (0.2%)
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   ⛁ Messages: 71.8k tokens (35.9%)
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶   ⛶ Free space: 113k (56.5%)
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ 
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ 
+     ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ ⛶ 
+
+     Custom agents · /agents
+     └ codebase-locator (User): 83 tokens
+     └ codebase-analyzer (User): 55 tokens
+     └ thoughts-locator (User): 97 tokens
+     └ web-search-researcher (User): 126 tokens
+     └ thoughts-analyzer (User): 42 tokens
+     └ codebase-pattern-finder (User): 94 tokens
+
+     SlashCommand Tool · 0 commands
+     └ Total: 998 tokens
+
+> /research_codebase is running… 
+
+⏺ I'm ready to help you create a detailed implementation plan for the Virtual MCP Server
+  feature described in the outline. Based on my comprehensive research of the MCP gateway
+  architecture, I now have a deep understanding of how MCP servers are created, deployed, and
+  how connections are managed.
+
+  Let me start by analyzing the requirements from the outline and identifying the key
+  implementation challenges:
+
+  Initial Analysis
+
+  From outline.md, I understand we need to build a Virtual/Composite MCP Server (VMCP) system
+  that:
+
+  1. Combines multiple MCP servers into a single, unified server
+  2. Filters and customizes which tools/resources/prompts are exposed
+  3. Allows renaming of client-facing names and descriptions
+  4. Handles OAuth for all component servers requiring authentication
+  5. Manages access control via ACR rules
+  6. Tracks usage and audit logs appropriately
+
+  Key Technical Challenges I've Identified
+
+  Based on my research, here are the critical implementation questions:
+
+  1. Deployment Architecture: Should VMCP be:
+    - A new backend type in the SessionManager that wraps multiple clients?
+    - A containerized proxy server that aggregates component servers?
+    - A remote MCP server that internally manages connections?
+  2. Name Transformation: The gateway currently passes tool names directly through. For VMCP:
+    - Need bidirectional mapping: {vmcp_tool} ↔ {component_server}:{real_tool}
+    - Where should transforms happen? (Gateway handler vs VMCP server itself?)
+    - How to handle name collisions across component servers?
+  3. Multi-Level OAuth: Current system tracks tokens per (userID, mcpID). For VMCP:
+    - Need tokens per (userID, vmcpID, componentMCPID)?
+    - Should OAuth flow present all providers at once or sequentially?
+    - How to handle partial OAuth (user authenticates to some but not all components)?
+  4. Session Management: Current sessions are per-MCP-server. For VMCP:
+    - One session ID mapping to N component sessions?
+    - How to handle component server failures without breaking the VMCP session?
+  5. Audit Logging: Current design logs per server. For VMCP:
+    - Top-level logs for VMCP calls vs component-level logs?
+    - Should component server calls be visible to users or hidden?
+
+  Questions Before I Proceed
+
+  Before I create the implementation plan, I need your guidance on these design decisions:
+
+  1. Architecture Choice: Which deployment model do you prefer?
+    - Option A: New SessionManager backend that manages multiple MCP clients internally
+    - Option B: Containerized proxy/aggregator server (treated like any containerized MCP
+  server)
+    - Option C: Something else you have in mind?
+  2. Tool Filtering Approach: For restricting tools/resources/prompts:
+    - Should filtering happen at the VMCP catalog entry level (stored in manifest)?
+    - Or should it be enforced at runtime in the gateway?
+  3. OAuth UX: When VMCP has 3 component servers requiring OAuth:
+    - Show user all 3 OAuth providers upfront ("Authenticate with Google, GitHub, Slack")?
+    - Or redirect sequentially (authenticate with each as needed)?
+    - Or allow skipping some (VMCP works with subset of authenticated servers)?
+  4. Phase Scope: Should the first implementation include:
+    - Full resource/prompt support, or just tools initially?
+    - Elicitations and sampling support?
+    - Or start with a minimal viable version?
+
+  Once you clarify these design decisions, I'll create a comprehensive, phased implementation
+  plan with specific file changes, code examples, and success criteria!
+
+> I need you to research more about the mcp oauth flow, second level oauth flow, and how 
+servers, their deployments, token storage, api's and storage types interact. Like I know 
+there's a session id, and an oauthapprequestid, and some sessionstate, but I don't know how 
+they interact and what they're used for 
+
+⏺ codebase-analyzer(Analyze OAuth identifiers and state)
+  ⎿  Done (51 tool uses · 77.1k tokens · 3m 57s)                                              
+
+⏺ codebase-analyzer(Trace complete OAuth flow end-to-end)
+  ⎿  Done (27 tool uses · 50.1k tokens · 3m 19s)                                              
+
+⏺ codebase-analyzer(Analyze token storage architecture)
+  ⎿  Done (42 tool uses · 71.2k tokens · 2m 50s)                                              
+
+⏺ Read(pkg/storage/apis/obot.obot.ai/v1/oauthappauth.go)
+  ⎿  Error reading file
+
+⏺ Read(pkg/storage/apis/obot.obot.ai/v1/oauthtoken.go)
+  ⎿  Read 41 lines
+
+⏺ Search(pattern: "type.*State.*struct", path: "pkg/api/handlers/mcpgateway/oauth", type: "go",
+        output_mode: "content")
+  ⎿  Found 0 lines 
+
+⏺ Perfect! I've completed comprehensive research on the OAuth flow, tokens, sessions, and how
+  they all interact. Let me provide you with a detailed explanation:
+
+  ---
+  MCP OAuth Flow: Complete Identifier Breakdown
+
+  The Key Insight: Two Different "Sessions"
+
+  This is the most confusing part! There are two completely separate session concepts:
+
+  1. MCP Protocol Session (from Mcp-Session-Id header)
+
+  - Purpose: Maintains MCP protocol state between client and server
+  - Source: Generated by the nanobot MCP library when a client first connects
+  - Stored in: Kubernetes v1.MCPSession resource
+  - Contains: MCP initialization state, capabilities, tool lists
+  - Lifetime: From client connection until disconnect
+  - Used for: MCP message routing, not authentication
+
+  2. Obot User Session (from cookie)
+
+  - Purpose: Tracks authenticated user in Obot's web UI
+  - Source: Created when user logs into Obot (via oauth2-proxy)
+  - Stored in: Gateway database as SessionCookie
+  - Contains: User authentication state, session cookie value
+  - Lifetime: From login until logout
+  - Used for: First-level OAuth authentication
+
+  These are completely independent! The MCP protocol session ID has nothing to do with OAuth
+  authentication.
+
+  ---
+  Complete OAuth Flow with All Identifiers
+
+  Phase 1: Client Registration
+
+  What happens:
+  MCP Client → POST /oauth/register/{mcp_id}
+            ← Returns: client_id, client_secret, registration_token
+
+  Identifiers created:
+  1. Client ID: oauth-client-{random} - stored in v1.OAuthClient.Name
+  2. Client Secret: Random text - stored as bcrypt hash in v1.OAuthClient.Spec.ClientSecretHash
+  3. Registration Token: Random text - for updating client config later
+
+  Storage: Kubernetes resource v1.OAuthClient
+
+  ---
+  Phase 2: Authorization Request (First-Level)
+
+  What happens:
+  MCP Client → GET
+  /oauth/authorize?client_id=...&redirect_uri=...&state=CLIENT_STATE&code_challenge=...
+            ← 302 Redirect to: /?rd=/oauth/callback/{oauth_auth_request_id}/{mcp_id}
+
+  Identifiers created:
+  1. OAuthAuthRequest ID: oauth-app-{random} - auto-generated K8s resource name
+  2. Client State: Passed through from client for CSRF protection
+
+  Storage: Kubernetes resource v1.OAuthAuthRequest
+  - Stores: State (from client), CodeChallenge, RedirectURI, ClientID
+  - NOT stored yet: User info, authorization code
+
+  Why the redirect? User needs to authenticate with Obot's login system first!
+
+  ---
+  Phase 3a: User Authentication
+
+  What happens:
+  User → Logs into Obot UI
+       ← Sets cookie: obot_access_token (contains session ID)
+       → Redirected to: /oauth/callback/{oauth_auth_request_id}/{mcp_id}
+
+  Identifiers created:
+  1. Obot Session ID: From the login cookie (oauth2-proxy ticket)
+  2. Hashed Session ID: SHA-256 hash of session ID
+  3. Authorization Code: {random_text}{random_text} - two concatenated random strings
+  4. Hashed Authorization Code: SHA-256 hash of the code
+
+  Storage updates:
+
+  SessionCookie (gateway database):
+  - Primary Key: (HashedSessionID, AuthProviderNamespace, AuthProviderName)
+  - Stores: Encrypted cookie value, UserID
+
+  v1.OAuthAuthRequest (Kubernetes):
+  - Updates with: HashedAuthCode, UserID, HashedSessionID, auth provider info
+
+  Authorization code returned to client:
+  302 Redirect to: {client_redirect_uri}?code=AUTHORIZATION_CODE&state=CLIENT_STATE
+
+  ---
+  Phase 3b: Second-Level OAuth (If MCP Server Requires It)
+
+  When does this happen? If mcp_id is provided AND the MCP server is a remote server requiring
+  OAuth (e.g., connecting to Google Drive MCP server that needs Google OAuth).
+
+  What happens:
+  Obot → Tries to connect to MCP server
+       ← MCP server returns: 401 with WWW-Authenticate header (OAuth required)
+       → Generates state and redirects user to: Third-party OAuth (e.g., Google)
+
+  Identifiers created:
+  1. MCP OAuth State: {random_text} - for correlating the callback
+  2. Hashed State: SHA-256 hash for database lookup
+  3. PKCE Verifier: Random string for PKCE flow
+
+  Storage: MCPOAuthToken in gateway database
+  - Primary Key: (MCPID, UserID)
+  - Stores (encrypted): State, Verifier, ClientID, ClientSecret, OAuth endpoint URLs
+  - Links back: OAuthAuthRequestID (points to the first-level auth request)
+  - Tokens NOT stored yet - just the OAuth config and state
+
+  Also cached in-memory: stateCache maps state → channel for async callback
+
+  User redirected to third-party:
+  302 Redirect to: https://accounts.google.com/oauth/authorize?state=MCP_STATE&...
+
+  ---
+  Phase 3c: Second-Level Callback
+
+  What happens:
+  User → Authenticates with Google (or other provider)
+       ← 302 Redirect to: /oauth/mcp/callback?state=MCP_STATE&code=THIRD_PARTY_CODE
+
+  Processing:
+  1. Look up state in cache or database (by hashed state)
+  2. Exchange THIRD_PARTY_CODE for access/refresh tokens with Google
+  3. Store encrypted tokens in MCPOAuthToken database record
+  4. Retrieve the OAuthAuthRequestID from the token record
+  5. Load the first-level v1.OAuthAuthRequest resource
+  6. Generate NEW authorization code for first-level flow
+  7. Update OAuthAuthRequest with new hashed code
+
+  Why new auth code? The first code was already hashed and can't be recovered!
+
+  User redirected back to MCP client:
+  302 Redirect to: {client_redirect_uri}?code=NEW_AUTHORIZATION_CODE&state=CLIENT_STATE
+
+  ---
+  Phase 4: Token Exchange
+
+  What happens:
+  MCP Client → POST /oauth/token
+              grant_type=authorization_code
+              code=AUTHORIZATION_CODE
+              code_verifier=... (if PKCE used)
+            ← Returns: access_token (JWT), refresh_token
+
+  Processing:
+  1. Hash the submitted code
+  2. Look up v1.OAuthAuthRequest by HashedAuthCode field
+  3. Delete the OAuthAuthRequest (one-time use!)
+  4. Verify PKCE if code_challenge was used
+  5. Verify session cookie still exists (user hasn't logged out)
+  6. Generate JWT access token (10-minute expiry)
+  7. Generate refresh token
+  8. Create v1.OAuthToken with SHA-256 hash of refresh token as name
+
+  Identifiers created:
+  1. Access Token: Signed JWT containing user info, expires in 10 min
+  2. Refresh Token: Random text
+  3. Hashed Refresh Token: SHA-256 hash used as K8s resource name
+
+  Storage: v1.OAuthToken in Kubernetes
+  - Name: Hash of refresh token
+  - Stores: ClientID, UserID, HashedSessionID, resource URL
+  - Does NOT store actual tokens - only metadata
+
+  ---
+  Phase 5: Using Tokens for MCP Requests
+
+  What happens:
+  MCP Client → GET /api/mcp-gateway/{mcp_id}
+              Authorization: Bearer {ACCESS_TOKEN}
+              Mcp-Session-Id: {mcp_protocol_session_id}
+
+  First-Level Token Validation:
+  - JWT validated using JWKS public key
+  - Claims extracted: UserID, session, auth provider
+
+  Second-Level Token Usage (if remote MCP with OAuth):
+  - Gateway calls tokenStore.ForUserAndMCP(userID, mcpID)
+  - Loads MCPOAuthToken from database
+  - Decrypts access/refresh tokens
+  - Passes to MCP client library
+  - Library automatically refreshes if expired
+
+  MCP Protocol Session:
+  - Separate from OAuth - tracks MCP state
+  - Stored in v1.MCPSession Kubernetes resource
+  - Updated on every MCP message
+
+  ---
+  How Identifiers Relate to Each Other
+
+  Client Registration:
+    client_id → v1.OAuthClient.Name
+
+  First-Level OAuth:
+    client_id → OAuthAuthRequest.Spec.ClientID
+    client_state → OAuthAuthRequest.Spec.State (passed through)
+    
+  User Authentication:
+    session_cookie → SessionCookie.Cookie (encrypted)
+    SHA256(session_id) → OAuthAuthRequest.Spec.HashedSessionID
+                       → OAuthToken.Spec.HashedSessionID
+    
+  Authorization Code:
+    SHA256(code) → OAuthAuthRequest.Spec.HashedAuthCode (index for lookup)
+    
+  Second-Level OAuth:
+    mcp_state → MCPOAuthToken.State (encrypted)
+    SHA256(mcp_state) → MCPOAuthToken.HashedState (unique index)
+    oauth_auth_request_id → MCPOAuthToken.OAuthAuthRequestID (links back)
+
+  Third-Party Tokens:
+    access_token → MCPOAuthToken.AccessToken (encrypted)
+    refresh_token → MCPOAuthToken.RefreshToken (encrypted)
+
+  First-Level Tokens:
+    access_token → JWT (signed, not stored)
+    SHA256(refresh_token) → OAuthToken.Name (resource name)
+
+  ---
+  Storage Summary
+
+  | What                   | Where                     | How              |
+  |------------------------|---------------------------|------------------|
+  | Client credentials     | v1.OAuthClient (K8s)      | bcrypt hash      |
+  | Authorization request  | v1.OAuthAuthRequest (K8s) | Hashed codes     |
+  | Session cookie         | SessionCookie (DB)        | Encrypted        |
+  | Refresh token metadata | v1.OAuthToken (K8s)       | Hashed name      |
+  | JWT access token       | Not stored                | Signed JWT       |
+  | MCP OAuth tokens       | MCPOAuthToken (DB)        | Encrypted        |
+  | MCP protocol session   | v1.MCPSession (K8s)       | Serialized state |
+
+  ---
+  Key Takeaways
+
+  1. Two session types: MCP protocol session (header) vs Obot user session (cookie) -
+  completely independent!
+  2. OAuthAuthRequest is the central coordinator:
+    - Created at authorization start
+    - Updated after user auth
+    - Links to session via HashedSessionID
+    - Deleted after one-time code exchange
+  3. Hashing everywhere:
+    - Auth codes: Never stored in plaintext
+    - Refresh tokens: Hash used as K8s resource name
+    - Session IDs: Hashed for privacy
+    - States: Hashed for database lookup
+  4. Two-level linking: MCPOAuthToken.OAuthAuthRequestID connects second-level MCP OAuth back
+  to first-level client OAuth
+  5. Token refresh rotation: Both levels rotate tokens on refresh - old deleted, new created
+  6. Encryption only for second-level: First-level uses hashing + JWTs, second-level uses AES
+  encryption for third-party tokens
+
+  Does this clarify how all the pieces fit together? Feel free to ask about any specific part
+  of the flow!
+
+> /usage 
+  ⎿  Status dialog dismissed
+
+
+
