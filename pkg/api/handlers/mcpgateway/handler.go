@@ -126,6 +126,13 @@ type messageContext struct {
 }
 
 func (h *Handler) OnMessage(ctx context.Context, msg nmcp.Message) {
+	// TODO(cmcp): The method needs to be updated to handle composite MCP servers by
+	// - creating and managing clients for component servers
+	// - transforming tool and prompt names, applying tool/prompt overrides, and hiding tools/prompts when appropriate
+	// - forwarding requests to the correct servers based on the tool name
+	// - aggregating request/responses to all servers when appropriate (e.g. on Initialize and methodToolsList)
+	// - ensuring that component servers get distinct sessions
+
 	if h.pendingRequestsForSession(msg.Session.ID()).Notify(msg) {
 		// This is a response to a pending request.
 		// We don't forward it to the client, just return.

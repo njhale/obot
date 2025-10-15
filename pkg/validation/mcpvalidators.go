@@ -1,3 +1,5 @@
+// TODO(cmcp): Update the validators to handle composite runtimes
+// For example, it should ensure that there are no duplicates in the CompositeRuntime
 package validation
 
 import (

@@ -1145,6 +1145,8 @@ func (m *MCPHandler) CreateServer(req api.Context) error {
 	}
 
 	if input.CatalogEntryID != "" {
+		// TODO(cmcp): This handler needs to produce component servers when a composite MCP server is created
+		// It should also use the manifests provided by the composite entry's CompositeConfig field to generate component manifests
 		var catalogEntry v1.MCPServerCatalogEntry
 		if err := req.Get(&catalogEntry, input.CatalogEntryID); err != nil {
 			return err
@@ -1329,6 +1331,9 @@ func (m *MCPHandler) UpdateServerAlias(req api.Context) error {
 }
 
 func (m *MCPHandler) ConfigureServer(req api.Context) error {
+	// TODO(cmcp): Update this handler to work with composite MCP servers
+	// - The given envs should be projected back onto the corresponding component server (not sure how to do this gracefully)
+	// - ensure credentials are scoped correctly for components
 	catalogID := req.PathValue("catalog_id")
 	workspaceID := req.PathValue("workspace_id")
 
@@ -2030,7 +2035,7 @@ func (m *MCPHandler) GetServerDetails(req api.Context) error {
 		mcpServerDisplayName = server.Name
 	}
 
-	// TODO(njhale): Aggregate server details for composite MCP servers.
+	// TODO(cmcp): Aggregate server details for composite MCP servers.
 	details, err := m.mcpSessionManager.GetServerDetails(req.Context(), mcpServerDisplayName, server.Name, serverConfig)
 	if err != nil {
 		if nse := (*mcp.ErrNotSupportedByBackend)(nil); errors.As(err, &nse) {

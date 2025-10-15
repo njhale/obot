@@ -253,6 +253,10 @@ func (h *MCPCatalogHandler) GetEntry(req api.Context) error {
 
 // CreateEntry creates a new entry for a catalog or workspace.
 func (h *MCPCatalogHandler) CreateEntry(req api.Context) error {
+	// TODO(cmcp): Update this method to handle composite catalog entries.
+	// - It should add the manifest of each entry referenced by CompositeCatalogConfig to the respective element there
+	// - The envs of the manifest should be projected onto the top-level manifest in such a way we can map them back to the corresponding MCP server at configuration time
+
 	catalogName := req.PathValue("catalog_id")
 	workspaceID := req.PathValue("workspace_id")
 
@@ -308,6 +312,7 @@ func (h *MCPCatalogHandler) CreateEntry(req api.Context) error {
 }
 
 func (h *MCPCatalogHandler) UpdateEntry(req api.Context) error {
+	// TODO(cmcp): Update this handler to handle updating composite entries
 	catalogName := req.PathValue("catalog_id")
 	workspaceID := req.PathValue("workspace_id")
 	entryName := req.PathValue("entry_id")
