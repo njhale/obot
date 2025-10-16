@@ -278,6 +278,13 @@ func (h *MCPCatalogHandler) CreateEntry(req api.Context) error {
 		return types.NewErrBadRequest("failed to read entry manifest: %v", err)
 	}
 
+	// Handle composite catalog entries
+	if manifest.Runtime == types.RuntimeComposite && manifest.CompositeConfig != nil {
+		if err := h.populateComponentManifests(req, &manifest, catalogName, workspaceID); err != nil {
+			return err
+		}
+	}
+
 	if err := validation.ValidateCatalogEntryManifest(manifest); err != nil {
 		return types.NewErrBadRequest("failed to validate entry manifest: %v", err)
 	}
@@ -349,6 +356,13 @@ func (h *MCPCatalogHandler) UpdateEntry(req api.Context) error {
 	var manifest types.MCPServerCatalogEntryManifest
 	if err := req.Read(&manifest); err != nil {
 		return types.NewErrBadRequest("failed to read entry manifest: %v", err)
+	}
+
+	// Handle composite catalog entries
+	if manifest.Runtime == types.RuntimeComposite && manifest.CompositeConfig != nil {
+		if err := h.populateComponentManifests(req, &manifest, catalogName, workspaceID); err != nil {
+			return err
+		}
 	}
 
 	if err := validation.ValidateCatalogEntryManifest(manifest); err != nil {
@@ -917,4 +931,69 @@ func normalizeMCPCatalogEntryName(name string) string {
 		name = strings.TrimRight(name, "-")
 	}
 	return name
+}
+
+func (h *MCPCatalogHandler) populateComponentManifests(req api.Context, manifest *types.MCPServerCatalogEntryManifest, catalogName, workspaceID string) error {
+	// For each component server, fetch its catalog entry and populate the manifest
+	for i := range manifest.CompositeConfig.ComponentServers {
+		component := &manifest.CompositeConfig.ComponentServers[i]
+
+		var entry v1.MCPServerCatalogEntry
+		if err := req.Get(&entry, component.CatalogEntryID); err != nil {
+			return types.NewErrBadRequest("failed to get component catalog entry %s: %v", component.CatalogEntryID, err)
+		}
+
+		// Verify the component entry belongs to the same scope
+		if catalogName != "" && entry.Spec.MCPCatalogName != catalogName {
+			return types.NewErrBadRequest("component entry %s does not belong to catalog %s", component.CatalogEntryID, catalogName)
+		}
+		if workspaceID != "" && entry.Spec.PowerUserWorkspaceID != workspaceID {
+			return types.NewErrBadRequest("component entry %s does not belong to workspace %s", component.CatalogEntryID, workspaceID)
+		}
+
+		// Populate the manifest
+		component.Manifest = entry.Spec.Manifest
+	}
+
+	// Project component envs to top-level manifest with prefixes for disambiguation
+	manifest.Env = h.projectComponentEnvs(manifest.CompositeConfig.ComponentServers)
+
+	return nil
+}
+
+func (h *MCPCatalogHandler) projectComponentEnvs(components []types.CatalogComponentServer) []types.MCPEnv {
+	var projectedEnvs []types.MCPEnv
+
+	for _, component := range components {
+		// Create a prefix from the component's manifest name (normalized)
+		prefix := normalizeMCPCatalogEntryName(component.Manifest.Name)
+
+		for _, env := range component.Manifest.Env {
+			projected := env
+			// Add prefix to name for display
+			projected.Name = fmt.Sprintf("%s: %s", component.Manifest.Name, env.Name)
+			// Add prefix to key for uniqueness
+			projected.Key = fmt.Sprintf("%s_%s", strings.ToUpper(prefix), env.Key)
+			// Add metadata to track which component this belongs to
+			projected.Description = fmt.Sprintf("[%s] %s", component.Manifest.Name, env.Description)
+
+			projectedEnvs = append(projectedEnvs, projected)
+		}
+
+		// Also project remote config headers if present
+		if component.Manifest.Runtime == types.RuntimeRemote && component.Manifest.RemoteConfig != nil {
+			for _, header := range component.Manifest.RemoteConfig.Headers {
+				projected := types.MCPEnv{
+					MCPHeader: header,
+				}
+				projected.Name = fmt.Sprintf("%s: %s", component.Manifest.Name, header.Name)
+				projected.Key = fmt.Sprintf("%s_%s", strings.ToUpper(prefix), strings.ReplaceAll(strings.ToUpper(header.Key), "-", "_"))
+				projected.Description = fmt.Sprintf("[%s] %s", component.Manifest.Name, header.Description)
+
+				projectedEnvs = append(projectedEnvs, projected)
+			}
+		}
+	}
+
+	return projectedEnvs
 }

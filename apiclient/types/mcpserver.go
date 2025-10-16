@@ -419,6 +419,40 @@ func MapCatalogEntryToServer(catalogEntry MCPServerCatalogEntryManifest, userURL
 		remoteConfig.Headers = catalogEntry.RemoteConfig.Headers
 		serverManifest.RemoteConfig = remoteConfig
 
+	case RuntimeComposite:
+		if catalogEntry.CompositeConfig == nil {
+			return serverManifest, RuntimeValidationError{
+				Runtime: RuntimeComposite,
+				Field:   "compositeConfig",
+				Message: "composite configuration is required for composite runtime",
+			}
+		}
+
+		// Convert CatalogComponentServer to ComponentServer
+		componentServers := make([]ComponentServer, len(catalogEntry.CompositeConfig.ComponentServers))
+		for i, catalogComponent := range catalogEntry.CompositeConfig.ComponentServers {
+			// Convert the component's catalog manifest to server manifest
+			componentServerManifest, err := MapCatalogEntryToServer(catalogComponent.Manifest, "")
+			if err != nil {
+				return serverManifest, RuntimeValidationError{
+					Runtime: RuntimeComposite,
+					Field:   fmt.Sprintf("compositeConfig.componentServers[%d]", i),
+					Message: fmt.Sprintf("failed to convert component manifest: %v", err),
+				}
+			}
+
+			componentServers[i] = ComponentServer{
+				CatalogEntryID:     catalogComponent.CatalogEntryID,
+				Manifest:           componentServerManifest,
+				ToolOverrides:      catalogComponent.ToolOverrides,
+				ParameterOverrides: catalogComponent.ParameterOverrides,
+			}
+		}
+
+		serverManifest.CompositeConfig = &CompositeRuntimeConfig{
+			ComponentServers: componentServers,
+		}
+
 	default:
 		return serverManifest, RuntimeValidationError{
 			Runtime: catalogEntry.Runtime,
