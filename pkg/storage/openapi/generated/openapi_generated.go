@@ -1463,7 +1463,7 @@ func schema_obot_platform_obot_apiclient_types_CatalogComponentServer(ref common
 							Format:  "",
 						},
 					},
-					"catalogEntryManifest": {
+					"manifest": {
 						SchemaProps: spec.SchemaProps{
 							Default: map[string]interface{}{},
 							Ref:     ref("github.com/obot-platform/obot/apiclient/types.MCPServerCatalogEntryManifest"),
@@ -1496,7 +1496,7 @@ func schema_obot_platform_obot_apiclient_types_CatalogComponentServer(ref common
 						},
 					},
 				},
-				Required: []string{"catalogEntryID", "catalogEntryManifest"},
+				Required: []string{"catalogEntryID", "manifest"},
 			},
 		},
 		Dependencies: []string{
@@ -1654,7 +1654,7 @@ func schema_obot_platform_obot_apiclient_types_ComponentServer(ref common.Refere
 							Format:  "",
 						},
 					},
-					"serverManifest": {
+					"manifest": {
 						SchemaProps: spec.SchemaProps{
 							Default: map[string]interface{}{},
 							Ref:     ref("github.com/obot-platform/obot/apiclient/types.MCPServerManifest"),
@@ -1687,7 +1687,7 @@ func schema_obot_platform_obot_apiclient_types_ComponentServer(ref common.Refere
 						},
 					},
 				},
-				Required: []string{"catalogEntryID", "serverManifest"},
+				Required: []string{"catalogEntryID", "manifest"},
 			},
 		},
 		Dependencies: []string{

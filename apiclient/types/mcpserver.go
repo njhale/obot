@@ -62,10 +62,10 @@ type CompositeCatalogConfig struct {
 
 // CatalogComponentServer represents a component server in a composite server catalog entry.
 type CatalogComponentServer struct {
-	CatalogEntryID       string                        `json:"catalogEntryID"`
-	CatalogEntryManifest MCPServerCatalogEntryManifest `json:"catalogEntryManifest"`
-	ToolOverrides        []ToolOverride                `json:"toolOverrides,omitempty"`
-	ParameterOverrides   []ParameterOverride           `json:"parameterOverrides,omitempty"`
+	CatalogEntryID     string                        `json:"catalogEntryID"`
+	Manifest           MCPServerCatalogEntryManifest `json:"manifest"`
+	ToolOverrides      []ToolOverride                `json:"toolOverrides,omitempty"`
+	ParameterOverrides []ParameterOverride           `json:"parameterOverrides,omitempty"`
 }
 
 type CompositeRuntimeConfig struct {
@@ -74,7 +74,7 @@ type CompositeRuntimeConfig struct {
 
 type ComponentServer struct {
 	CatalogEntryID     string              `json:"catalogEntryID"`
-	ServerManifest     MCPServerManifest   `json:"serverManifest"`
+	Manifest           MCPServerManifest   `json:"manifest"`
 	ToolOverrides      []ToolOverride      `json:"toolOverrides,omitempty"`
 	ParameterOverrides []ParameterOverride `json:"parameterOverrides,omitempty"`
 }

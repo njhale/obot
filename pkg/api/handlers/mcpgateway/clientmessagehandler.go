@@ -62,6 +62,7 @@ func (h *Handler) asClientOption(session *nmcp.Session, userID, mcpID, mcpServer
 	return opts
 }
 
+// TODO(cmcp): This handler may also need to be involved with handling transforms for composite/component servers.
 type clientMessageHandler struct {
 	webhookHelper   *mcp.WebhookHelper
 	gptClient       *gptscript.GPTScript

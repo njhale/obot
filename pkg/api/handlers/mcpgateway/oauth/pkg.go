@@ -1,3 +1,5 @@
+package oauth
+
 // TODO(cmcp): This package needs to be updated to handle composite mcp servers by:
 // - managing oauth clients, oauth requests, tokens, and sessions for 1st and second level oauth for composite and component servers
 // 	 - ensure these things are scoped correctly and that refresh works correctly
