@@ -5,6 +5,7 @@ import {
 	type UVXRuntimeConfig,
 	type NPXRuntimeConfig,
 	type ContainerizedRuntimeConfig,
+	type CompositeRuntimeConfig,
 	type Task,
 	type ToolOverride,
 	type ParameterOverride
@@ -44,7 +45,7 @@ export interface CompositeCatalogConfig {
 
 export interface CatalogComponentServer {
 	catalogEntryID: string;
-	catalogEntryManifest: MCPCatalogEntryServerManifest;
+	manifest: MCPCatalogEntryServerManifest;
 	toolOverrides?: ToolOverride[];
 	parameterOverrides?: ParameterOverride[];
 }
@@ -115,6 +116,8 @@ export interface RuntimeFormData {
 	containerizedConfig?: ContainerizedRuntimeConfig;
 	remoteConfig?: RemoteCatalogConfigAdmin; // For catalog entries
 	remoteServerConfig?: RemoteRuntimeConfigAdmin; // For servers
+	compositeConfig?: CompositeCatalogConfig; // For catalog entries
+	compositeServerConfig?: CompositeRuntimeConfig; // For servers
 }
 
 export interface MCPCatalogServerManifest {

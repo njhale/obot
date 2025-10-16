@@ -2,37 +2,43 @@
 	import { Plus, Server, Trash2, ChevronDown, ChevronUp, LoaderCircle } from 'lucide-svelte';
 	import SearchMcpServers from '../admin/SearchMcpServers.svelte';
 	import { onMount } from 'svelte';
-	import { AdminService, type MCPCatalogEntry } from '$lib/services';
+	import {
+		AdminService,
+		type CompositeCatalogConfig,
+		type CompositeRuntimeConfig,
+		type MCPCatalogEntry
+	} from '$lib/services';
 	import type { AdminMcpServerAndEntriesContext } from '$lib/context/admin/mcpServerAndEntries.svelte';
 	import CatalogConfigureForm, { type LaunchFormData } from './CatalogConfigureForm.svelte';
 	import { hasEditableConfiguration, convertEnvHeadersToRecord } from '$lib/services/chat/mcp';
 
-interface Props {
-    compositeConfig: { components: { catalogEntryName: string; toolOverrides?: any[] }[] };
-    readonly?: boolean;
-    catalogId?: string;
-    mcpEntriesContextFn?: () => AdminMcpServerAndEntriesContext;
-}
+	interface Props {
+		config: CompositeCatalogConfig | CompositeRuntimeConfig;
+		readonly?: boolean;
+		catalogId?: string;
+		mcpEntriesContextFn?: () => AdminMcpServerAndEntriesContext;
+	}
 
-	let { compositeConfig = $bindable(), readonly, catalogId, mcpEntriesContextFn }: Props = $props();
+	let { config = $bindable(), readonly, catalogId, mcpEntriesContextFn }: Props = $props();
 	let searchDialog = $state<ReturnType<typeof SearchMcpServers>>();
 	let componentEntries = $state<MCPCatalogEntry[]>([]);
 	let expanded = $state<Record<string, boolean>>({});
 	let expandedToolParams = $state<Record<string, boolean>>({});
 	let loading = $state(false);
+
 	type ParameterRow = {
 		id: string;
 		originalName: string;
-		exposedName: string;
+		overrideName: string;
 		originalDescription?: string;
-		exposedDescription?: string;
+		overrideDescription?: string;
 	};
 	type ToolRow = {
 		id: string;
 		originalName: string;
-		exposedName: string;
+		overrideName: string;
 		originalDescription?: string;
-		exposedDescription?: string;
+		overrideDescription?: string;
 		enabled: boolean;
 		parameters?: ParameterRow[];
 	};
@@ -45,25 +51,25 @@ interface Props {
 		return text.length > max ? text.slice(0, max).trimEnd() + '…' : text;
 	}
 
-function updateCompositeToolMappings() {
-    if (!compositeConfig) return;
-    const components = (compositeConfig.components || []).map((c) => {
-        const rows = toolsByEntry[c.catalogEntryName] || [];
-        const toolOverrides = rows.map((row) => ({
-            name: row.originalName,
-            overrideName: row.exposedName,
-            overrideDescription: row.exposedDescription,
-            enabled: row.enabled,
-            parameterOverrides: row.parameters?.map((p) => ({
-                name: p.originalName,
-                overrideName: p.exposedName,
-                overrideDescription: p.exposedDescription
-            }))
-        }));
-        return { catalogEntryName: c.catalogEntryName, toolOverrides };
-    });
-    compositeConfig.components = components;
-}
+	function updateCompositeToolMappings() {
+		if (!config) return;
+		const componentServers = (config.componentServers || []).map((c) => {
+			const rows = toolsByEntry[c.catalogEntryID] || [];
+			const toolOverrides = rows.map((row) => ({
+				name: row.originalName,
+				overrideName: row.overrideName,
+				overrideDescription: row.overrideDescription,
+				enabled: row.enabled,
+				parameterOverrides: row.parameters?.map((p) => ({
+					name: p.originalName,
+					overrideName: p.overrideName,
+					overrideDescription: p.overrideDescription
+				}))
+			}));
+			return { catalogEntryID: c.catalogEntryID, manifest: c.manifest, toolOverrides };
+		});
+		config.componentServers = componentServers as any;
+	}
 
 	// Per-entry configuration dialog state
 	let configDialog = $state<ReturnType<typeof CatalogConfigureForm>>();
@@ -100,18 +106,18 @@ function updateCompositeToolMappings() {
 					? Object.keys(t.params).map((paramName) => ({
 							id: `${entry.id}-${t.id || t.name}-${paramName}`,
 							originalName: paramName,
-							exposedName: paramName,
+							overrideName: paramName,
 							originalDescription: t.params?.[paramName],
-							exposedDescription: t.params?.[paramName]
-					  }))
+							overrideDescription: t.params?.[paramName]
+						}))
 					: [];
 
 				return {
 					id: `${entry.id}-${t.id || t.name}`,
 					originalName: t.name,
-					exposedName: t.name,
+					overrideName: t.name,
 					originalDescription: t.description,
-					exposedDescription: t.description,
+					overrideDescription: t.description,
 					enabled: true,
 					parameters
 				};
@@ -137,16 +143,16 @@ function updateCompositeToolMappings() {
 
 	// Load full catalog entry details for display
 	async function loadComponentEntries() {
-    if (!compositeConfig?.components || !catalogId) return;
+		if (!config?.componentServers || !catalogId) return;
 
 		loading = true;
 		try {
-            const entries = await Promise.all(
-                compositeConfig.components.map(async (c) => {
+			const entries = await Promise.all(
+				config.componentServers.map(async (c) => {
 					try {
-                        return await AdminService.getMCPCatalogEntry(catalogId, c.catalogEntryName);
+						return await AdminService.getMCPCatalogEntry(catalogId, c.catalogEntryID);
 					} catch (e) {
-                        console.error(`Failed to load component entry ${c.catalogEntryName}:`, e);
+						console.error(`Failed to load component entry ${c.catalogEntryID}:`, e);
 						return null;
 					}
 				})
@@ -163,7 +169,7 @@ function updateCompositeToolMappings() {
 
 	// Re-fetch component entry details whenever the selected component IDs or catalog change
 	$effect(() => {
-    const idsKey = compositeConfig?.components?.map((c) => c.catalogEntryName).join(',') || '';
+		const idsKey = config?.componentServers?.map((c) => c.catalogEntryID).join(',') || '';
 		const catKey = catalogId || '';
 		// touch keys so Svelte tracks them
 		idsKey;
@@ -171,36 +177,37 @@ function updateCompositeToolMappings() {
 		loadComponentEntries();
 	});
 
-function handleAdd(mcpCatalogEntryIds: string[]) {
-    if (!compositeConfig) {
-        compositeConfig = { components: [] } as any;
-    }
-    const existing = new Set((compositeConfig.components || []).map((c) => c.catalogEntryName));
-    const newComponents = mcpCatalogEntryIds
-        .filter((id) => !existing.has(id))
-        .map((id) => ({ catalogEntryName: id, toolOverrides: [] }));
-    compositeConfig.components = [...(compositeConfig.components || []), ...newComponents];
-}
+	function handleAdd(mcpCatalogEntryIds: string[]) {
+		if (!config) {
+			config = { componentServers: [] } as any;
+		}
+		const existing = new Set((config.componentServers || []).map((c) => c.catalogEntryID));
+		const newComponents = mcpCatalogEntryIds
+			.filter((id) => !existing.has(id))
+			.map((id) => ({ catalogEntryID: id, manifest: {} as any, toolOverrides: [] }));
+		config.componentServers = [...(config.componentServers || []), ...newComponents] as any;
+	}
 
-function removeServer(entryId: string) {
-    compositeConfig.components = (compositeConfig.components || []).filter(
-        (c) => c.catalogEntryName !== entryId
-    );
-    delete toolsByEntry[entryId];
-    delete populatedByEntry[entryId];
-    delete loadingByEntry[entryId];
-}
+	function removeServer(entryId: string) {
+		config.componentServers = (config.componentServers || []).filter(
+			(c) => c.catalogEntryID !== entryId
+		) as any;
+		delete toolsByEntry[entryId];
+		delete populatedByEntry[entryId];
+		delete loadingByEntry[entryId];
+	}
 </script>
 
 <div
 	class="dark:bg-surface1 dark:border-surface3 flex flex-col gap-4 rounded-lg border border-transparent bg-white p-4 shadow-sm"
 >
-	<h4 class="text-sm font-semibold">Component MCP Servers</h4>
+	<h4 class="text-md font-semibold">Component Servers</h4>
 
 	<div class="flex flex-col gap-2">
 		{#if loading}
 			<div class="text-sm text-gray-500">Loading component servers...</div>
 		{:else if componentEntries.length > 0}
+
 			{#each componentEntries as entry (entry.id)}
 				<div
 					class="dark:bg-surface2 dark:border-surface3 rounded-lg border border-gray-200 bg-gray-50"
@@ -276,8 +283,8 @@ function removeServer(entryId: string) {
 										>
 											<div class="flex items-center gap-2">
 												<input
-													class="text-input-filled text-sm flex-1"
-													bind:value={tool.exposedName}
+													class="text-input-filled flex-1 text-sm"
+													bind:value={tool.overrideName}
 													oninput={() => updateCompositeToolMappings()}
 													placeholder="Tool name"
 												/>
@@ -307,8 +314,8 @@ function removeServer(entryId: string) {
 												{/if}
 											</div>
 											<textarea
-												class="text-input-filled text-xs resize-none"
-												bind:value={tool.exposedDescription}
+												class="text-input-filled resize-none text-xs"
+												bind:value={tool.overrideDescription}
 												oninput={() => updateCompositeToolMappings()}
 												placeholder="Tool description"
 												rows="2"
@@ -323,13 +330,13 @@ function removeServer(entryId: string) {
 														<div class="ml-4 flex flex-col gap-1">
 															<input
 																class="text-input-filled text-xs"
-																bind:value={param.exposedName}
+																bind:value={param.overrideName}
 																oninput={() => updateCompositeToolMappings()}
 																placeholder="Parameter name"
 															/>
 															<input
 																class="text-input-filled text-xs"
-																bind:value={param.exposedDescription}
+																bind:value={param.overrideDescription}
 																oninput={() => updateCompositeToolMappings()}
 																placeholder="Parameter description (optional)"
 															/>
@@ -346,9 +353,10 @@ function removeServer(entryId: string) {
 				</div>
 			{/each}
 		{:else}
-			<div class="text-sm text-gray-500 dark:text-gray-400">
-				No component servers added yet. Click the button below to add servers.
-			</div>
+				<div class="text-sm text-gray-500 dark:text-gray-400">
+					Select one or more MCP servers to include in the composite server. Users will see this as
+					a single server with aggregated tools and resources.
+				</div>
 		{/if}
 	</div>
 
@@ -363,18 +371,14 @@ function removeServer(entryId: string) {
 		</button>
 	{/if}
 
-	<p class="text-xs text-gray-500 dark:text-gray-400">
-		Select one or more MCP catalog entries to combine into a single composite server. Users will see
-		this as a single server with aggregated tools and resources.
-	</p>
 </div>
 
 <SearchMcpServers
 	bind:this={searchDialog}
 	onAdd={(mcpCatalogEntryIds) => handleAdd(mcpCatalogEntryIds)}
-exclude={compositeConfig?.components?.map((c) => c.catalogEntryName)}
-type="acr"
-{mcpEntriesContextFn}
+	exclude={['*', 'default', ...config?.componentServers?.map((c) => c.catalogEntryID)]}
+	type="filter"
+	{mcpEntriesContextFn}
 />
 
 <!-- Inline configuration dialog for previewing tools on components that require config -->

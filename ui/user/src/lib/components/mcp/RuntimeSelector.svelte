@@ -47,6 +47,11 @@
 			runtime = 'npx';
 			onRuntimeChange?.('npx');
 		}
+
+		if (serverType !== 'composite' && runtime === 'composite') {
+			runtime = 'composite';
+			onRuntimeChange?.('composite');
+		}
 	});
 
 	function handleRuntimeChange(option: { id: string; label: string }) {
@@ -58,7 +63,7 @@
 
 <div
 	class="dark:bg-surface1 dark:border-surface3 flex flex-col gap-4 rounded-lg border border-transparent bg-white p-4 shadow-sm {serverType ===
-	'remote' || serverType === 'composite'
+		'remote' || serverType === 'composite'
 		? 'hidden'
 		: ''}"
 >

@@ -11,6 +11,7 @@
 	import RuntimeSelector from '../mcp/RuntimeSelector.svelte';
 	import NpxRuntimeForm from '../mcp/NpxRuntimeForm.svelte';
 	import UvxRuntimeForm from '../mcp/UvxRuntimeForm.svelte';
+	import CompositeRuntimeForm from '../mcp/CompositeRuntimeForm.svelte';
 	import ContainerizedRuntimeForm from '../mcp/ContainerizedRuntimeForm.svelte';
 	import RemoteRuntimeForm from '../mcp/RemoteRuntimeForm.svelte';
 	import { AdminService, ChatService, type MCPCatalogServer } from '$lib/services';
@@ -21,6 +22,8 @@
 	import CategorySelectInput from './CategorySelectInput.svelte';
 	import Select from '../Select.svelte';
 	import { profile } from '$lib/stores';
+	import { getAdminMcpServerAndEntries } from '$lib/context/admin/mcpServerAndEntries.svelte';
+
 
 	interface Props {
 		id?: string;
@@ -41,7 +44,11 @@
 		} else {
 			// For catalog entries, determine type based on runtime
 			const catalogEntry = entry as MCPCatalogEntry;
-			return catalogEntry.manifest.runtime === 'remote' ? 'remote' : 'single';
+			return catalogEntry.manifest.runtime === 'composite'
+				? 'composite'
+				: catalogEntry.manifest.runtime === 'remote'
+				? 'remote'
+				: 'single';
 		}
 	}
 
@@ -92,7 +99,9 @@
 				uvxConfig: undefined,
 				containerizedConfig: undefined,
 				remoteConfig: undefined,
-				remoteServerConfig: undefined
+				remoteServerConfig: undefined,
+				compositeConfig: undefined,
+				compositeServerConfig: undefined,
 			};
 		}
 
@@ -112,7 +121,9 @@
 				uvxConfig: undefined,
 				containerizedConfig: undefined,
 				remoteConfig: undefined,
-				remoteServerConfig: undefined
+				remoteServerConfig: undefined,
+				compositeConfig: undefined,
+				compositeServerConfig: undefined,
 			};
 
 			// Initialize the appropriate runtime config based on the runtime type
@@ -181,6 +192,9 @@
 					break;
 				case 'remote':
 					formData.remoteConfig = manifest.remoteConfig || { fixedURL: '', headers: [] };
+					break;
+				case 'composite':
+					formData.compositeConfig = manifest.compositeConfig || { componentServers: [] };
 					break;
 			}
 
@@ -262,6 +276,9 @@
 			case 'remote':
 				// For remote servers (catalog entries), use remoteConfig
 				formData.remoteConfig = { fixedURL: '', headers: [] };
+				break;
+			case 'composite':
+				formData.compositeConfig = { componentServers: [] };
 				break;
 		}
 	}
@@ -389,6 +406,11 @@
 						hostname: baseData.remoteConfig.hostname?.trim() || undefined,
 						headers: baseData.remoteConfig.headers || []
 					};
+				}
+				break;
+			case 'composite':
+				if (baseData.compositeConfig) {
+					manifest.compositeConfig = { componentServers: baseData.compositeConfig.componentServers };
 				}
 				break;
 		}
@@ -546,7 +568,8 @@
 			const handleFns = {
 				single: handleEntrySubmit,
 				multi: handleServerSubmit,
-				remote: handleEntrySubmit
+				remote: handleEntrySubmit,
+				composite: handleEntrySubmit
 			};
 			const entryResponse = await handleFns[type]?.(id);
 			savedEntry = entryResponse;
@@ -712,10 +735,17 @@
 		{showRequired}
 		onFieldChange={updateRequired}
 	/>
+{:else if formData.runtime === 'composite' && formData.compositeConfig}
+	<CompositeRuntimeForm
+		bind:config={formData.compositeConfig}
+		{readonly}
+		catalogId={id}
+		mcpEntriesContextFn={getAdminMcpServerAndEntries}
+	/>
 {/if}
 
 <!-- Environment Variables Section -->
-{#if formData.runtime !== 'remote'}
+{#if !['remote', 'composite'].includes(formData.runtime)}
 	{#if !readonly || (readonly && formData.env && formData.env.length > 0)}
 		<div
 			class="dark:bg-surface1 dark:border-surface3 flex flex-col gap-4 rounded-lg border border-transparent bg-white p-4 shadow-sm"

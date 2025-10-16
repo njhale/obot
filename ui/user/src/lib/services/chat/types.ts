@@ -307,7 +307,7 @@ export interface CompositeRuntimeConfig {
 
 export interface ComponentServer {
 	catalogEntryID: string;
-	serverManifest: MCPServer;
+	manifest: MCPServer;
 	toolOverrides?: ToolOverride[];
 	parameterOverrides?: ParameterOverride[];
 }
@@ -359,7 +359,6 @@ export interface MCPServer {
 	containerizedConfig?: ContainerizedRuntimeConfig;
 	remoteConfig?: RemoteRuntimeConfig;
 	compositeConfig?: CompositeRuntimeConfig;
-
 }
 
 export interface MCPServerTool {
