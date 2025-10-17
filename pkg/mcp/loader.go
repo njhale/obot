@@ -238,7 +238,8 @@ func (sm *SessionManager) RestartServerDeployment(ctx context.Context, server Se
 }
 
 func (sm *SessionManager) ensureDeployment(ctx context.Context, id string, server ServerConfig, mcpServerDisplayName, mcpServerName string) (ServerConfig, error) {
-	if server.Runtime == otypes.RuntimeRemote {
+	switch server.Runtime {
+	case otypes.RuntimeRemote:
 		if server.URL == "" {
 			return ServerConfig{}, fmt.Errorf("MCP server %s needs to update its URL", mcpServerDisplayName)
 		}
@@ -262,7 +263,9 @@ func (sm *SessionManager) ensureDeployment(ctx context.Context, id string, serve
 				}
 			}
 		}
-		// This is a remote MCP server, so there is nothing to deploy.
+		fallthrough
+	case otypes.RuntimeComposite:
+		// This is either a remote or composite MCP server, so there is nothing to deploy
 		return server, nil
 	}
 

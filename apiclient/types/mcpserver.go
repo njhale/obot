@@ -62,10 +62,10 @@ type CompositeCatalogConfig struct {
 
 // CatalogComponentServer represents a component server in a composite server catalog entry.
 type CatalogComponentServer struct {
-	CatalogEntryID     string                        `json:"catalogEntryID"`
-	Manifest           MCPServerCatalogEntryManifest `json:"manifest"`
-	ToolOverrides      []ToolOverride                `json:"toolOverrides,omitempty"`
-	ParameterOverrides []ParameterOverride           `json:"parameterOverrides,omitempty"`
+	CatalogEntryID  string                        `json:"catalogEntryID"`
+	Manifest        MCPServerCatalogEntryManifest `json:"manifest"`
+	ToolOverrides   []ToolOverride                `json:"toolOverrides,omitempty"`
+	PromptOverrides []PromptOverride              `json:"promptOverrides,omitempty"`
 }
 
 type CompositeRuntimeConfig struct {
@@ -73,10 +73,10 @@ type CompositeRuntimeConfig struct {
 }
 
 type ComponentServer struct {
-	CatalogEntryID     string              `json:"catalogEntryID"`
-	Manifest           MCPServerManifest   `json:"manifest"`
-	ToolOverrides      []ToolOverride      `json:"toolOverrides,omitempty"`
-	ParameterOverrides []ParameterOverride `json:"parameterOverrides,omitempty"`
+	CatalogEntryID  string            `json:"catalogEntryID"`
+	Manifest        MCPServerManifest `json:"manifest"`
+	ToolOverrides   []ToolOverride    `json:"toolOverrides,omitempty"`
+	PromptOverrides []PromptOverride  `json:"promptOverrides,omitempty"`
 }
 
 type MCPServerCatalogEntry struct {
@@ -141,14 +141,7 @@ type ToolOverride struct {
 }
 
 // PromptArgumentOverride is used to override the name and description of a prompt argument.
-type PromptArgumentOverride struct {
-	// Name is the original argument name as defined by the component server
-	Name string `json:"name"`
-	// OverrideName is the argument name exposed by the composite server
-	OverrideName string `json:"overrideName"`
-	// Optional override for argument description
-	OverrideDescription string `json:"overrideDescription,omitempty"`
-}
+type PromptArgumentOverride ParameterOverride
 
 // PromptOverride is used to override the name and description of a prompt.
 type PromptOverride struct {
@@ -442,10 +435,10 @@ func MapCatalogEntryToServer(catalogEntry MCPServerCatalogEntryManifest, userURL
 			}
 
 			componentServers[i] = ComponentServer{
-				CatalogEntryID:     catalogComponent.CatalogEntryID,
-				Manifest:           componentServerManifest,
-				ToolOverrides:      catalogComponent.ToolOverrides,
-				ParameterOverrides: catalogComponent.ParameterOverrides,
+				CatalogEntryID:  catalogComponent.CatalogEntryID,
+				Manifest:        componentServerManifest,
+				ToolOverrides:   catalogComponent.ToolOverrides,
+				PromptOverrides: catalogComponent.PromptOverrides,
 			}
 		}
 

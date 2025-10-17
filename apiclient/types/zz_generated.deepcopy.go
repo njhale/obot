@@ -469,10 +469,12 @@ func (in *CatalogComponentServer) DeepCopyInto(out *CatalogComponentServer) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	if in.ParameterOverrides != nil {
-		in, out := &in.ParameterOverrides, &out.ParameterOverrides
-		*out = make([]ParameterOverride, len(*in))
-		copy(*out, *in)
+	if in.PromptOverrides != nil {
+		in, out := &in.PromptOverrides, &out.PromptOverrides
+		*out = make([]PromptOverride, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
 	}
 }
 
@@ -558,10 +560,12 @@ func (in *ComponentServer) DeepCopyInto(out *ComponentServer) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	if in.ParameterOverrides != nil {
-		in, out := &in.ParameterOverrides, &out.ParameterOverrides
-		*out = make([]ParameterOverride, len(*in))
-		copy(*out, *in)
+	if in.PromptOverrides != nil {
+		in, out := &in.PromptOverrides, &out.PromptOverrides
+		*out = make([]PromptOverride, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
 	}
 }
 

@@ -167,16 +167,6 @@
 		loadComponentEntries();
 	});
 
-	// Re-fetch component entry details whenever the selected component IDs or catalog change
-	$effect(() => {
-		const idsKey = config?.componentServers?.map((c) => c.catalogEntryID).join(',') || '';
-		const catKey = catalogId || '';
-		// touch keys so Svelte tracks them
-		idsKey;
-		catKey;
-		loadComponentEntries();
-	});
-
 	function handleAdd(mcpCatalogEntryIds: string[]) {
 		if (!config) {
 			config = { componentServers: [] } as any;

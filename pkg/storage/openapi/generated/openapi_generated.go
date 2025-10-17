@@ -1482,14 +1482,14 @@ func schema_obot_platform_obot_apiclient_types_CatalogComponentServer(ref common
 							},
 						},
 					},
-					"parameterOverrides": {
+					"promptOverrides": {
 						SchemaProps: spec.SchemaProps{
 							Type: []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
 									SchemaProps: spec.SchemaProps{
 										Default: map[string]interface{}{},
-										Ref:     ref("github.com/obot-platform/obot/apiclient/types.ParameterOverride"),
+										Ref:     ref("github.com/obot-platform/obot/apiclient/types.PromptOverride"),
 									},
 								},
 							},
@@ -1500,7 +1500,7 @@ func schema_obot_platform_obot_apiclient_types_CatalogComponentServer(ref common
 			},
 		},
 		Dependencies: []string{
-			"github.com/obot-platform/obot/apiclient/types.MCPServerCatalogEntryManifest", "github.com/obot-platform/obot/apiclient/types.ParameterOverride", "github.com/obot-platform/obot/apiclient/types.ToolOverride"},
+			"github.com/obot-platform/obot/apiclient/types.MCPServerCatalogEntryManifest", "github.com/obot-platform/obot/apiclient/types.PromptOverride", "github.com/obot-platform/obot/apiclient/types.ToolOverride"},
 	}
 }
 
@@ -1673,14 +1673,14 @@ func schema_obot_platform_obot_apiclient_types_ComponentServer(ref common.Refere
 							},
 						},
 					},
-					"parameterOverrides": {
+					"promptOverrides": {
 						SchemaProps: spec.SchemaProps{
 							Type: []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
 									SchemaProps: spec.SchemaProps{
 										Default: map[string]interface{}{},
-										Ref:     ref("github.com/obot-platform/obot/apiclient/types.ParameterOverride"),
+										Ref:     ref("github.com/obot-platform/obot/apiclient/types.PromptOverride"),
 									},
 								},
 							},
@@ -1691,7 +1691,7 @@ func schema_obot_platform_obot_apiclient_types_ComponentServer(ref common.Refere
 			},
 		},
 		Dependencies: []string{
-			"github.com/obot-platform/obot/apiclient/types.MCPServerManifest", "github.com/obot-platform/obot/apiclient/types.ParameterOverride", "github.com/obot-platform/obot/apiclient/types.ToolOverride"},
+			"github.com/obot-platform/obot/apiclient/types.MCPServerManifest", "github.com/obot-platform/obot/apiclient/types.PromptOverride", "github.com/obot-platform/obot/apiclient/types.ToolOverride"},
 	}
 }
 
@@ -6974,7 +6974,7 @@ func schema_obot_platform_obot_apiclient_types_PromptArgumentOverride(ref common
 				Properties: map[string]spec.Schema{
 					"name": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Name is the original argument name as defined by the component server",
+							Description: "Name is the original parameter name as defined by the component server",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -6982,7 +6982,7 @@ func schema_obot_platform_obot_apiclient_types_PromptArgumentOverride(ref common
 					},
 					"overrideName": {
 						SchemaProps: spec.SchemaProps{
-							Description: "OverrideName is the argument name exposed by the composite server",
+							Description: "OverrideName is the parameter name exposed by the composite server",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -6990,7 +6990,7 @@ func schema_obot_platform_obot_apiclient_types_PromptArgumentOverride(ref common
 					},
 					"overrideDescription": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Optional override for argument description",
+							Description: "Optional override for parameter description",
 							Type:        []string{"string"},
 							Format:      "",
 						},

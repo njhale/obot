@@ -810,6 +810,7 @@ func mcpServerOrInstanceFromConnectURL(req api.Context, id string) (v1.MCPServer
 	default:
 		// In this case, id refers to a catalog entry.
 		// Get the catalog entry to make sure it's valid
+		var entry v1.MCPServerCatalogEntry
 		if err := req.Get(&v1.MCPServerCatalogEntry{}, id); err != nil {
 			return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrNotFound("catalog entry %s not found", id)
 		}
@@ -827,9 +828,9 @@ func mcpServerOrInstanceFromConnectURL(req api.Context, id string) (v1.MCPServer
 		}
 		if len(servers.Items) == 0 {
 			// If the user has not configured an MCP server for the catalog entry, and the catalog entry does not have any required configuration, then create an server for the user.
-			var entry v1.MCPServerCatalogEntry
-			if err := req.Get(&entry, id); err != nil {
-				return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrNotFound("user has not configured an MCP server for catalog entry %s", id)
+			if entry.Spec.Manifest.Runtime == types.RuntimeComposite {
+				// For now launching composite servers by connecting to a catalog entry ID is not supported.
+				return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrNotFound("user has not configured an MCP server for composite catalog entry %s", id)
 			}
 
 			for _, env := range entry.Spec.Manifest.Env {
@@ -911,7 +912,7 @@ func ServerForActionWithConnectID(req api.Context, id string) (string, v1.MCPSer
 		server, config, err := serverFromMCPServerInstance(req, instance)
 		return instance.Name, server, config, err
 	case server.Name != "":
-		config, err := serverConfigForAction(req, server)
+		config, err := ServerConfigForAction(req, server)
 		return server.Name, server, config, err
 	default:
 		return "", v1.MCPServer{}, mcp.ServerConfig{}, fmt.Errorf("unknown MCP server ID %s", id)
@@ -965,11 +966,11 @@ func ServerForAction(req api.Context, id string) (v1.MCPServer, mcp.ServerConfig
 		return server, mcp.ServerConfig{}, err
 	}
 
-	serverConfig, err := serverConfigForAction(req, server)
+	serverConfig, err := ServerConfigForAction(req, server)
 	return server, serverConfig, err
 }
 
-func serverConfigForAction(req api.Context, server v1.MCPServer) (mcp.ServerConfig, error) {
+func ServerConfigForAction(req api.Context, server v1.MCPServer) (mcp.ServerConfig, error) {
 	if server.Spec.NeedsURL {
 		return mcp.ServerConfig{}, types.NewErrBadRequest("mcp server %s needs to update its URL", server.Name)
 	}
