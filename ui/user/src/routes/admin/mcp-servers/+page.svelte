@@ -59,7 +59,11 @@
 	afterNavigate(({ to }) => {
 		if (browser && to?.url) {
 			const serverId = to.url.searchParams.get('id');
-			const createNewType = to.url.searchParams.get('new') as 'single' | 'multi' | 'remote';
+			const createNewType = to.url.searchParams.get('new') as
+				| 'single'
+				| 'multi'
+				| 'remote'
+				| 'composite';
 			if (createNewType) {
 				selectServerType(createNewType, false);
 			} else if (!serverId && (selectedEntryServer || showServerForm)) {
@@ -75,7 +79,7 @@
 	let editingSource = $state<{ index: number; value: string }>();
 	let sourceDialog = $state<HTMLDialogElement>();
 	let selectServerTypeDialog = $state<ReturnType<typeof SelectServerType>>();
-	let selectedServerType = $state<'single' | 'multi' | 'remote'>();
+	let selectedServerType = $state<'single' | 'multi' | 'remote' | 'composite'>();
 	let selectedEntryServer = $state<MCPCatalogEntry | MCPCatalogServer>();
 	let query = $state('');
 
@@ -90,7 +94,7 @@
 		mcpServerAndEntries.entries.length + mcpServerAndEntries.servers.length
 	);
 
-	function selectServerType(type: 'single' | 'multi' | 'remote', updateUrl = true) {
+	function selectServerType(type: 'single' | 'multi' | 'remote' | 'composite', updateUrl = true) {
 		selectedServerType = type;
 		selectServerTypeDialog?.close();
 		showServerForm = true;
@@ -266,7 +270,9 @@
 			? 'Single User'
 			: selectedServerType === 'multi'
 				? 'Multi-User'
-				: 'Remote'}
+				: selectedServerType === 'remote'
+					? 'Remote'
+					: 'Composite'}
 	<div class="flex flex-col gap-6" in:fly={{ x: 100, delay: duration, duration }}>
 		<BackLink fromURL="mcp-servers" currentLabel={`Create ${currentLabelType} Server`} />
 		<McpServerEntryForm
@@ -277,7 +283,7 @@
 				showServerForm = false;
 			}}
 			onSubmit={async (id, type) => {
-				if (type === 'single' || type === 'remote') {
+				if (type === 'single' || type === 'remote' || type === 'composite') {
 					goto(`/admin/mcp-servers/c/${id}`);
 				} else {
 					goto(`/admin/mcp-servers/s/${id}`);

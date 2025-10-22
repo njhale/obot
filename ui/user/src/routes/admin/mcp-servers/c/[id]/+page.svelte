@@ -37,7 +37,11 @@
 
 		<McpServerEntryForm
 			entry={catalogEntry}
-			type={catalogEntry?.manifest.runtime === 'remote' ? 'remote' : 'single'}
+			type={catalogEntry?.manifest.runtime === 'composite'
+				? 'composite'
+				: catalogEntry?.manifest.runtime === 'remote'
+					? 'remote'
+					: 'single'}
 			readonly={isAdminReadonly || isSourcedEntry}
 			id={DEFAULT_MCP_CATALOG_ID}
 			onCancel={() => {
