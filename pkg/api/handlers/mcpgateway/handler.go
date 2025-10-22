@@ -18,6 +18,7 @@ import (
 	"github.com/gptscript-ai/go-gptscript"
 	"github.com/gptscript-ai/gptscript/pkg/mvl"
 	nmcp "github.com/nanobot-ai/nanobot/pkg/mcp"
+	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/pkg/api"
 	"github.com/obot-platform/obot/pkg/api/handlers"
 	gateway "github.com/obot-platform/obot/pkg/gateway/client"
@@ -103,26 +104,69 @@ func (h *Handler) StreamableHTTP(req api.Context) error {
 		return fmt.Errorf("failed to get mcp server config: %w", err)
 	}
 
-	req.Request = req.WithContext(withMessageContext(req.Context(), messageContext{
-		userID:       req.User.GetUID(),
-		mcpID:        mcpID,
-		serverConfig: mcpServerConfig,
-		mcpServer:    mcpServer,
-		req:          req.Request,
-		resp:         req.ResponseWriter,
-	}))
+	messageCtx := messageContext{
+		serverContext: serverContext{
+			userID:       req.User.GetUID(),
+			mcpID:        mcpID,
+			mcpServer:    mcpServer,
+			serverConfig: mcpServerConfig,
+		},
+		req:  req.Request,
+		resp: req.ResponseWriter,
+	}
+	if mcpServerConfig.Runtime == types.RuntimeComposite {
+		// List all component servers for the composite server.
+		var componentServerList v1.MCPServerList
+		if err := req.List(&componentServerList,
+			kclient.InNamespace(mcpServer.Namespace),
+			kclient.MatchingFields{
+				"spec.compositeName": mcpServer.Name,
+			}); err != nil {
+			return fmt.Errorf("failed to list component servers for composite server %s: %v", mcpServer.Name, err)
+		}
+
+		componentServers := make([]serverContext, 0, len(componentServerList.Items))
+		for _, componentServer := range componentServerList.Items {
+			config, err := handlers.ServerConfigForAction(req, componentServer)
+			if err != nil {
+				// If the component isn't configured or can't be reached, skip it.
+				log.Warnf("Failed to get component server %s: %v", componentServer.Name, err)
+				continue
+			}
+
+			componentServers = append(componentServers, serverContext{
+				userID:       req.User.GetUID(),
+				mcpID:        componentServer.Name,
+				mcpServer:    componentServer,
+				serverConfig: config,
+			})
+		}
+
+		if len(componentServers) < 1 {
+			return fmt.Errorf("composite server %s has no running component servers", mcpServer.Name)
+		}
+
+		messageCtx.compositeContext = newCompositeContext(mcpServer.Spec.Manifest.CompositeConfig, componentServers)
+	}
+
+	req.Request = req.WithContext(withMessageContext(req.Context(), messageCtx))
 
 	nmcp.NewHTTPServer(nil, h, nmcp.HTTPServerOptions{SessionStore: h}).ServeHTTP(req.ResponseWriter, req.Request)
 
 	return nil
 }
 
-type messageContext struct {
+type serverContext struct {
 	userID, mcpID string
 	mcpServer     v1.MCPServer
 	serverConfig  mcp.ServerConfig
-	req           *http.Request
-	resp          http.ResponseWriter
+}
+
+type messageContext struct {
+	serverContext
+	compositeContext
+	req  *http.Request
+	resp http.ResponseWriter
 }
 
 func (h *Handler) OnMessage(ctx context.Context, msg nmcp.Message) {
@@ -142,6 +186,15 @@ func (h *Handler) OnMessage(ctx context.Context, msg nmcp.Message) {
 		return
 	}
 
+	if m.serverConfig.Runtime == types.RuntimeComposite {
+		h.onCompositeMessage(ctx, msg, m)
+		return
+	}
+
+	h.onMessage(ctx, msg, m)
+}
+
+func (h *Handler) onMessage(ctx context.Context, msg nmcp.Message, m messageContext) {
 	// Determine PowerUserWorkspaceID: use server's workspace ID for multi-user servers,
 	// or look up catalog entry's workspace ID for single-user servers
 	powerUserWorkspaceID := m.mcpServer.Spec.PowerUserWorkspaceID
@@ -340,6 +393,7 @@ func (h *Handler) OnMessage(ctx context.Context, msg nmcp.Message) {
 		return
 	}
 
+	// Send forward the message to the server and wait for the result
 	if err = client.Session.Exchange(ctx, msg.Method, &msg, &result); err != nil {
 		log.Errorf("Failed to send %s message to server %s: %v", msg.Method, m.mcpServer.Name, err)
 		return

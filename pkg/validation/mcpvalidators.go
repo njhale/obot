@@ -416,6 +416,196 @@ func (v RemoteValidator) validateRemoteCatalogConfig(config types.RemoteCatalogC
 	return nil
 }
 
+// CompositeValidator implements RuntimeValidator for composite runtime
+type CompositeValidator struct{}
+
+func (v CompositeValidator) ValidateConfig(manifest types.MCPServerManifest) error {
+	if manifest.CompositeConfig == nil {
+		return types.RuntimeValidationError{
+			Runtime: types.RuntimeComposite,
+			Field:   "compositeConfig",
+			Message: "composite configuration is required for composite runtime",
+		}
+	}
+
+	if len(manifest.CompositeConfig.ComponentServers) == 0 {
+		return types.RuntimeValidationError{
+			Runtime: types.RuntimeComposite,
+			Field:   "compositeConfig.componentServers",
+			Message: "at least one component server is required",
+		}
+	}
+
+	// Check for duplicate component servers
+	seen := make(map[string]bool)
+	for _, component := range manifest.CompositeConfig.ComponentServers {
+		if component.CatalogEntryID == "" {
+			return types.RuntimeValidationError{
+				Runtime: types.RuntimeComposite,
+				Field:   "compositeConfig.componentServers.catalogEntryID",
+				Message: "catalogEntryID is required for each component server",
+			}
+		}
+
+		if seen[component.CatalogEntryID] {
+			return types.RuntimeValidationError{
+				Runtime: types.RuntimeComposite,
+				Field:   "compositeConfig.componentServers",
+				Message: fmt.Sprintf("duplicate component server: %s", component.CatalogEntryID),
+			}
+		}
+		seen[component.CatalogEntryID] = true
+
+		// Validate tool overrides
+		if err := validateToolOverrides(component.ToolOverrides); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (v CompositeValidator) ValidateCatalogConfig(manifest types.MCPServerCatalogEntryManifest) error {
+	if manifest.CompositeConfig == nil {
+		return types.RuntimeValidationError{
+			Runtime: types.RuntimeComposite,
+			Field:   "compositeConfig",
+			Message: "composite configuration is required for composite runtime",
+		}
+	}
+
+	if len(manifest.CompositeConfig.ComponentServers) == 0 {
+		return types.RuntimeValidationError{
+			Runtime: types.RuntimeComposite,
+			Field:   "compositeConfig.componentServers",
+			Message: "at least one component server is required",
+		}
+	}
+
+	// Check for duplicate component servers
+	seen := make(map[string]bool)
+	for _, component := range manifest.CompositeConfig.ComponentServers {
+		if component.CatalogEntryID == "" {
+			return types.RuntimeValidationError{
+				Runtime: types.RuntimeComposite,
+				Field:   "compositeConfig.componentServers.catalogEntryID",
+				Message: "catalogEntryID is required for each component server",
+			}
+		}
+
+		if seen[component.CatalogEntryID] {
+			return types.RuntimeValidationError{
+				Runtime: types.RuntimeComposite,
+				Field:   "compositeConfig.componentServers",
+				Message: fmt.Sprintf("duplicate component server: %s", component.CatalogEntryID),
+			}
+		}
+		seen[component.CatalogEntryID] = true
+
+		// Validate tool overrides
+		if err := validateToolOverrides(component.ToolOverrides); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateToolOverrides(overrides []types.ToolOverride) error {
+	seenNames := make(map[string]bool)
+	seenOverrideNames := make(map[string]bool)
+
+	for _, override := range overrides {
+		if override.Name == "" {
+			return types.RuntimeValidationError{
+				Runtime: types.RuntimeComposite,
+				Field:   "toolOverrides.name",
+				Message: "original tool name is required",
+			}
+		}
+
+		if override.OverrideName == "" {
+			return types.RuntimeValidationError{
+				Runtime: types.RuntimeComposite,
+				Field:   "toolOverrides.overrideName",
+				Message: "override tool name is required",
+			}
+		}
+
+		// Check for duplicate original names
+		if seenNames[override.Name] {
+			return types.RuntimeValidationError{
+				Runtime: types.RuntimeComposite,
+				Field:   "toolOverrides.name",
+				Message: fmt.Sprintf("duplicate tool override for: %s", override.Name),
+			}
+		}
+		seenNames[override.Name] = true
+
+		// Check for duplicate override names (only for enabled tools)
+		if override.Enabled && seenOverrideNames[override.OverrideName] {
+			return types.RuntimeValidationError{
+				Runtime: types.RuntimeComposite,
+				Field:   "toolOverrides.overrideName",
+				Message: fmt.Sprintf("duplicate override name: %s", override.OverrideName),
+			}
+		}
+		if override.Enabled {
+			seenOverrideNames[override.OverrideName] = true
+		}
+
+		// Validate parameter overrides
+		if err := validateParameterOverrides(override.ParameterOverrides); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateParameterOverrides(overrides []types.ParameterOverride) error {
+	seenNames := make(map[string]bool)
+	seenOverrideNames := make(map[string]bool)
+
+	for _, override := range overrides {
+		if override.Name == "" {
+			return types.RuntimeValidationError{
+				Runtime: types.RuntimeComposite,
+				Field:   "parameterOverrides.name",
+				Message: "original parameter name is required",
+			}
+		}
+
+		if override.OverrideName == "" {
+			return types.RuntimeValidationError{
+				Runtime: types.RuntimeComposite,
+				Field:   "parameterOverrides.overrideName",
+				Message: "override parameter name is required",
+			}
+		}
+
+		if seenNames[override.Name] {
+			return types.RuntimeValidationError{
+				Runtime: types.RuntimeComposite,
+				Field:   "parameterOverrides.name",
+				Message: fmt.Sprintf("duplicate parameter override for: %s", override.Name),
+			}
+		}
+		seenNames[override.Name] = true
+
+		if seenOverrideNames[override.OverrideName] {
+			return types.RuntimeValidationError{
+				Runtime: types.RuntimeComposite,
+				Field:   "parameterOverrides.overrideName",
+				Message: fmt.Sprintf("duplicate override name: %s", override.OverrideName),
+			}
+		}
+		seenOverrideNames[override.OverrideName] = true
+	}
+
+	return nil
+}
+
 // getRuntimeValidators returns a map of all available runtime validators
 func getRuntimeValidators() RuntimeValidators {
 	return RuntimeValidators{
@@ -423,6 +613,7 @@ func getRuntimeValidators() RuntimeValidators {
 		types.RuntimeNPX:           NPXValidator{},
 		types.RuntimeContainerized: ContainerizedValidator{},
 		types.RuntimeRemote:        RemoteValidator{},
+		types.RuntimeComposite:     CompositeValidator{},
 	}
 }
 

@@ -44,4 +44,8 @@ func SetupHandlers(gatewayClient *client.Client, oauthChecker *MCPOAuthHandlerFa
 
 	mux.HandleFunc("GET /oauth/jwks.json", h.tokenService.ServeJWKS)
 	mux.HandleFunc("POST /oauth/replace-jwks", h.tokenService.ReplaceJWK)
+
+	// Composite OAuth unified flow endpoints (only two paths)
+	// TODO(cmcp): Switch this back to /oauth/composite/{mcp_id}
+	mux.HandleFunc("GET /api/oauth/composite/{mcp_id}", h.checkCompositeAuth)
 }

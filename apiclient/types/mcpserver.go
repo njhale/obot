@@ -15,6 +15,7 @@ const (
 	RuntimeNPX           Runtime = "npx"
 	RuntimeContainerized Runtime = "containerized"
 	RuntimeRemote        Runtime = "remote"
+	RuntimeComposite     Runtime = "composite"
 )
 
 // UVXRuntimeConfig represents configuration for UVX runtime (Python packages via uvx)
@@ -54,6 +55,34 @@ type RemoteCatalogConfig struct {
 	Headers     []MCPHeader `json:"headers,omitempty"`     // Optional
 }
 
+// CompositeCatalogConfig represents configuration for composite servers in catalog entries.
+type CompositeCatalogConfig struct {
+	ComponentServers []CatalogComponentServer `json:"componentServers"`
+}
+
+// CatalogComponentServer represents a component server in a composite server catalog entry.
+type CatalogComponentServer struct {
+	CatalogEntryID  string                        `json:"catalogEntryID"`
+	MCPServerID     string                        `json:"mcpServerID,omitempty"`
+	Manifest        MCPServerCatalogEntryManifest `json:"manifest"`
+	ToolOverrides   []ToolOverride                `json:"toolOverrides,omitempty"`
+	PromptOverrides []PromptOverride              `json:"promptOverrides,omitempty"`
+}
+
+type CompositeRuntimeConfig struct {
+	ComponentServers []ComponentServer `json:"componentServers"`
+}
+
+type ComponentServer struct {
+	// CatalogEntryID is used when the component server is a single-user or remote server.
+	CatalogEntryID string `json:"catalogEntryID"`
+	// MCPServerID is used when the component server is a multi-user server.
+	MCPServerID     string            `json:"mcpServerID,omitempty"`
+	Manifest        MCPServerManifest `json:"manifest"`
+	ToolOverrides   []ToolOverride    `json:"toolOverrides,omitempty"`
+	PromptOverrides []PromptOverride  `json:"promptOverrides,omitempty"`
+}
+
 type MCPServerCatalogEntry struct {
 	Metadata
 	Manifest                  MCPServerCatalogEntryManifest `json:"manifest"`
@@ -83,8 +112,53 @@ type MCPServerCatalogEntryManifest struct {
 	NPXConfig           *NPXRuntimeConfig           `json:"npxConfig,omitempty"`
 	ContainerizedConfig *ContainerizedRuntimeConfig `json:"containerizedConfig,omitempty"`
 	RemoteConfig        *RemoteCatalogConfig        `json:"remoteConfig,omitempty"`
+	CompositeConfig     *CompositeCatalogConfig     `json:"compositeConfig,omitempty"`
 
 	Env []MCPEnv `json:"env,omitempty"`
+}
+
+// TODO(njhale): Prompt and tool overrides are effectively the same types with slightly different field names.
+// Consolidate them into a single set of types.
+
+// ParameterOverride is used to override the name and description of a parameter.
+type ParameterOverride struct {
+	// Name is the original parameter name as defined by the component server
+	Name string `json:"name"`
+	// OverrideName is the parameter name exposed by the composite server
+	OverrideName string `json:"overrideName"`
+	// Optional override for parameter description
+	OverrideDescription string `json:"overrideDescription,omitempty"`
+}
+
+// ToolOverride defines how a single component tool is exposed by the composite server
+type ToolOverride struct {
+	// Name is the original tool name as returned by the component server
+	Name string `json:"name"`
+	// OverrideName is the tool name exposed by the composite server
+	OverrideName string `json:"overrideName"`
+	// Optional overrides for display
+	OverrideDescription string `json:"overrideDescription,omitempty"`
+	// Whether to include this tool (default true)
+	Enabled bool `json:"enabled,omitempty"`
+	// Optional parameter name/description overrides
+	ParameterOverrides []ParameterOverride `json:"parameterOverrides,omitempty"`
+}
+
+// PromptArgumentOverride is used to override the name and description of a prompt argument.
+type PromptArgumentOverride ParameterOverride
+
+// PromptOverride is used to override the name and description of a prompt.
+type PromptOverride struct {
+	// Name is the original prompt name as returned by the component server
+	Name string `json:"name"`
+	// OverrideName is the prompt name exposed by the composite server
+	OverrideName string `json:"overrideName"`
+	// Optional overrides for display
+	OverrideDescription string `json:"overrideDescription,omitempty"`
+	// Whether to include this prompt (default true)
+	Enabled bool `json:"enabled,omitempty"`
+	// Optional argument name/description overrides
+	ArgumentOverrides []PromptArgumentOverride `json:"argumentOverrides,omitempty"`
 }
 
 type MCPHeader struct {
@@ -123,6 +197,7 @@ type MCPServerManifest struct {
 	NPXConfig           *NPXRuntimeConfig           `json:"npxConfig,omitempty"`
 	ContainerizedConfig *ContainerizedRuntimeConfig `json:"containerizedConfig,omitempty"`
 	RemoteConfig        *RemoteRuntimeConfig        `json:"remoteConfig,omitempty"`
+	CompositeConfig     *CompositeRuntimeConfig     `json:"compositeConfig,omitempty"`
 
 	Env []MCPEnv `json:"env,omitempty"`
 
@@ -340,6 +415,40 @@ func MapCatalogEntryToServer(catalogEntry MCPServerCatalogEntryManifest, userURL
 		// Copy headers from catalog entry
 		remoteConfig.Headers = catalogEntry.RemoteConfig.Headers
 		serverManifest.RemoteConfig = remoteConfig
+
+	case RuntimeComposite:
+		if catalogEntry.CompositeConfig == nil {
+			return serverManifest, RuntimeValidationError{
+				Runtime: RuntimeComposite,
+				Field:   "compositeConfig",
+				Message: "composite configuration is required for composite runtime",
+			}
+		}
+
+		// Convert CatalogComponentServer to ComponentServer
+		componentServers := make([]ComponentServer, len(catalogEntry.CompositeConfig.ComponentServers))
+		for i, catalogComponent := range catalogEntry.CompositeConfig.ComponentServers {
+			// Convert the component's catalog manifest to server manifest
+			componentServerManifest, err := MapCatalogEntryToServer(catalogComponent.Manifest, "")
+			if err != nil {
+				return serverManifest, RuntimeValidationError{
+					Runtime: RuntimeComposite,
+					Field:   fmt.Sprintf("compositeConfig.componentServers[%d]", i),
+					Message: fmt.Sprintf("failed to convert component manifest: %v", err),
+				}
+			}
+
+			componentServers[i] = ComponentServer{
+				CatalogEntryID:  catalogComponent.CatalogEntryID,
+				Manifest:        componentServerManifest,
+				ToolOverrides:   catalogComponent.ToolOverrides,
+				PromptOverrides: catalogComponent.PromptOverrides,
+			}
+		}
+
+		serverManifest.CompositeConfig = &CompositeRuntimeConfig{
+			ComponentServers: componentServers,
+		}
 
 	default:
 		return serverManifest, RuntimeValidationError{
