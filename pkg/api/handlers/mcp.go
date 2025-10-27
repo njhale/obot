@@ -384,7 +384,7 @@ func (m *MCPHandler) LaunchServer(req api.Context) error {
 				continue
 			}
 
-			config, err := ServerConfigForAction(req, component)
+			config, err := serverConfigForAction(req, component)
 			if err != nil {
 				return fmt.Errorf("failed to get config for component server %s: %w", component.Name, err)
 			}
@@ -951,7 +951,7 @@ func ServerForActionWithConnectID(req api.Context, id string) (string, v1.MCPSer
 		server, config, err := serverFromMCPServerInstance(req, instance)
 		return instance.Name, server, config, err
 	case server.Name != "":
-		config, err := ServerConfigForAction(req, server)
+		config, err := serverConfigForAction(req, server)
 		return server.Name, server, config, err
 	default:
 		return "", v1.MCPServer{}, mcp.ServerConfig{}, fmt.Errorf("unknown MCP server ID %s", id)
@@ -1005,11 +1005,11 @@ func ServerForAction(req api.Context, id string) (v1.MCPServer, mcp.ServerConfig
 		return server, mcp.ServerConfig{}, err
 	}
 
-	serverConfig, err := ServerConfigForAction(req, server)
+	serverConfig, err := serverConfigForAction(req, server)
 	return server, serverConfig, err
 }
 
-func ServerConfigForAction(req api.Context, server v1.MCPServer) (mcp.ServerConfig, error) {
+func serverConfigForAction(req api.Context, server v1.MCPServer) (mcp.ServerConfig, error) {
 	if server.Spec.NeedsURL {
 		return mcp.ServerConfig{}, types.NewErrBadRequest("mcp server %s needs to update its URL", server.Name)
 	}

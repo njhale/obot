@@ -370,8 +370,8 @@ func (h *handler) oauthCallback(req api.Context) error {
 	}
 
 	// Check if the MCP server is a component of a composite; only finalize if it's not
-	_, server, _, err := handlers.ServerForActionWithConnectID(req, mcpID)
-	if err != nil {
+	var server v1.MCPServer
+	if err := req.Get(&server, mcpID); err != nil {
 		redirectWithAuthorizeError(req, oauthAppAuthRequest.Spec.RedirectURI, Error{
 			Code:        ErrServerError,
 			Description: err.Error(),

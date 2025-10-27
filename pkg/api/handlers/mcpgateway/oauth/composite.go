@@ -26,8 +26,8 @@ func (h *handler) checkCompositeAuth(req api.Context) error {
 		compositeMCPID     = req.PathValue("mcp_id")
 		oauthAuthRequestID = req.URL.Query().Get("oauth_auth_request")
 	)
-	_, compositeServer, _, err := handlers.ServerForActionWithConnectID(req, compositeMCPID)
-	if err != nil {
+	var compositeServer v1.MCPServer
+	if err := req.Get(&compositeServer, compositeMCPID); err != nil {
 		return fmt.Errorf("failed to get composite server: %w", err)
 	}
 
@@ -70,7 +70,7 @@ func (h *handler) checkCompositeAuth(req api.Context) error {
 			continue
 		}
 
-		serverConfig, err := handlers.ServerConfigForAction(req, componentServer)
+		_, serverConfig, err := handlers.ServerForAction(req, componentServer.Name)
 		if err != nil {
 			return fmt.Errorf("failed to get server config: %w", err)
 		}

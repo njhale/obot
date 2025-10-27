@@ -58,7 +58,7 @@ func (h *Handler) onCompositeMessage(ctx context.Context, msg nmcp.Message, m me
 	}
 
 	type componentClient struct {
-		serverContext
+		messageContext
 		*mcp.Client
 	}
 	var (
@@ -159,8 +159,8 @@ func (h *Handler) onCompositeMessage(ctx context.Context, msg nmcp.Message, m me
 		}
 
 		clients[componentKey] = componentClient{
-			serverContext: componentServer,
-			Client:        client,
+			messageContext: componentServer,
+			Client:         client,
 		}
 	}
 
@@ -509,11 +509,11 @@ func mergeInitializeResults(composite nmcp.InitializeResult, component nmcp.Init
 }
 
 type compositeContext struct {
-	componentServers []serverContext
+	componentServers []messageContext
 	toolOverrides    map[string]otypes.ToolOverride
 }
 
-func newCompositeContext(config *otypes.CompositeRuntimeConfig, componentServers []serverContext) compositeContext {
+func newCompositeContext(config *otypes.CompositeRuntimeConfig, componentServers []messageContext) compositeContext {
 	compositeContext := compositeContext{
 		componentServers: componentServers,
 		toolOverrides:    make(map[string]otypes.ToolOverride),

@@ -71,7 +71,7 @@ func (f *MCPOAuthHandlerFactory) CheckForMCPAuth(req api.Context, mcpServer v1.M
 				continue
 			}
 
-			componentConfig, err := handlers.ServerConfigForAction(req, componentServer)
+			_, componentConfig, err := handlers.ServerForAction(req, componentServer.Name)
 			if err != nil {
 				continue
 			}
