@@ -185,7 +185,6 @@ func (h *Handler) onCompositeMessage(ctx context.Context, msg nmcp.Message, m me
 				}
 				return
 			}
-
 		}
 
 		// All components responded, reply with the last result
@@ -248,6 +247,7 @@ func (h *Handler) onCompositeMessage(ctx context.Context, msg nmcp.Message, m me
 				Code:    -32603,
 				Message: fmt.Sprintf("failed to reply to composite server %s: %v", m.mcpID, err),
 			}
+			return
 		}
 
 		result = compositeResult
@@ -265,7 +265,6 @@ func (h *Handler) onCompositeMessage(ctx context.Context, msg nmcp.Message, m me
 				compositePrompts = append(compositePrompts, m.toCompositePrompt(componentKey, prompt))
 			}
 		}
-
 		compositeResult := nmcp.ListPromptsResult{
 			Prompts: compositePrompts,
 		}
@@ -276,12 +275,11 @@ func (h *Handler) onCompositeMessage(ctx context.Context, msg nmcp.Message, m me
 				Message: fmt.Sprintf("failed to reply to composite server %s: %v", m.mcpID, err),
 			}
 		}
-
 		result = compositeResult
 		return
 	case methodPromptsGet:
 		var compositeRequest nmcp.GetPromptRequest
-		if err := json.Unmarshal(msg.Params, &compositeRequest); err != nil {
+		if err = json.Unmarshal(msg.Params, &compositeRequest); err != nil {
 			err = &nmcp.RPCError{
 				Code:    -32602,
 				Message: fmt.Sprintf("Failed to unmarshal get prompt request: %v", err),
@@ -309,11 +307,11 @@ func (h *Handler) onCompositeMessage(ctx context.Context, msg nmcp.Message, m me
 
 		componentRequest := m.toComponentGetPromptRequest(componentKey, compositeRequest)
 
-		b, err := json.Marshal(componentRequest)
-		if err != nil {
+		b, marshalErr := json.Marshal(componentRequest)
+		if marshalErr != nil {
 			err = &nmcp.RPCError{
 				Code:    -32603,
-				Message: fmt.Sprintf("failed to marshal request for server %s: %v", client.mcpServer.Name, err),
+				Message: fmt.Sprintf("failed to marshal request for server %s: %v", client.mcpServer.Name, marshalErr),
 			}
 			return
 		}
@@ -331,6 +329,7 @@ func (h *Handler) onCompositeMessage(ctx context.Context, msg nmcp.Message, m me
 				Code:    -32603,
 				Message: fmt.Sprintf("failed to reply to composite server %s: %v", m.mcpID, err),
 			}
+			return
 		}
 
 		result = componentResult
@@ -338,15 +337,15 @@ func (h *Handler) onCompositeMessage(ctx context.Context, msg nmcp.Message, m me
 	case methodToolsList:
 		var compositeTools []nmcp.Tool
 		for componentKey, client := range clients {
-			var result nmcp.ListToolsResult
-			if err = client.Session.Exchange(ctx, methodToolsList, &msg, &result); err != nil {
+			var lr nmcp.ListToolsResult
+			if err = client.Session.Exchange(ctx, methodToolsList, &msg, &lr); err != nil {
 				log.Errorf("Failed to send %s message to server %s: %v", msg.Method, client.mcpID, err)
 				return
 			}
-			for _, tool := range result.Tools {
-				compositeTool, err := m.toCompositeTool(componentKey, tool)
-				if err != nil {
-					err = fmt.Errorf("failed to override tool %s: %w", tool.Name, err)
+			for _, tool := range lr.Tools {
+				compositeTool, convErr := m.toCompositeTool(componentKey, tool)
+				if convErr != nil {
+					err = fmt.Errorf("failed to override tool %s: %w", tool.Name, convErr)
 					return
 				}
 
@@ -370,13 +369,13 @@ func (h *Handler) onCompositeMessage(ctx context.Context, msg nmcp.Message, m me
 				Code:    -32603,
 				Message: fmt.Sprintf("failed to reply to composite server %s: %v", m.mcpID, err),
 			}
+			return
 		}
-
 		result = compositeResult
 		return
 	case methodToolsCall:
 		var compositeRequest nmcp.CallToolRequest
-		if err := json.Unmarshal(msg.Params, &compositeRequest); err != nil {
+		if err = json.Unmarshal(msg.Params, &compositeRequest); err != nil {
 			err = &nmcp.RPCError{
 				Code:    -32602,
 				Message: fmt.Sprintf("Failed to unmarshal tool call request: %v", err),
@@ -402,7 +401,8 @@ func (h *Handler) onCompositeMessage(ctx context.Context, msg nmcp.Message, m me
 			return
 		}
 
-		componentRequest, err := m.toComponentCallToolRequest(componentKey, compositeRequest)
+		var componentRequest *nmcp.CallToolRequest
+		componentRequest, err = m.toComponentCallToolRequest(componentKey, compositeRequest)
 		if err != nil {
 			log.Errorf("Failed to convert tool call request to component tool call request: %v", err)
 			return
@@ -412,13 +412,14 @@ func (h *Handler) onCompositeMessage(ctx context.Context, msg nmcp.Message, m me
 				Code:    -32602,
 				Message: fmt.Sprintf("Unknown tool: %s", compositeRequest.Name),
 			}
+			return
 		}
 
-		b, err := json.Marshal(componentRequest)
-		if err != nil {
+		b, marshalErr := json.Marshal(componentRequest)
+		if marshalErr != nil {
 			err = &nmcp.RPCError{
 				Code:    -32603,
-				Message: fmt.Sprintf("failed to marshal request for server %s: %v", client.mcpServer.Name, err),
+				Message: fmt.Sprintf("failed to marshal request for server %s: %v", client.mcpServer.Name, marshalErr),
 			}
 			return
 		}
@@ -436,6 +437,7 @@ func (h *Handler) onCompositeMessage(ctx context.Context, msg nmcp.Message, m me
 				Code:    -32603,
 				Message: fmt.Sprintf("failed to reply to composite server %s: %v", m.mcpID, err),
 			}
+			return
 		}
 
 		result = componentResult
@@ -466,7 +468,6 @@ func (h *Handler) onCompositeMessage(ctx context.Context, msg nmcp.Message, m me
 			Message: "Method not allowed",
 		}
 	}
-
 }
 
 func normalizeName(name string) string {

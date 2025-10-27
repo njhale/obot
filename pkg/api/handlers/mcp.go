@@ -1265,14 +1265,14 @@ func (m *MCPHandler) CreateServer(req api.Context) error {
 		if catalogEntry.Spec.Manifest.Runtime == types.RuntimeComposite {
 			// Helper writes the response and returns; finish early
 			return m.createCompositeServer(req, server, catalogEntry, input)
-		} else {
-			manifest, err := serverManifestFromCatalogEntryManifest(req.UserIsAdmin(), catalogEntry.Spec.Manifest, input.MCPServerManifest)
-			if err != nil {
-				return err
-			}
-			server.Spec.Manifest = manifest
-			server.Spec.UnsupportedTools = catalogEntry.Spec.UnsupportedTools
 		}
+
+		manifest, err := serverManifestFromCatalogEntryManifest(req.UserIsAdmin(), catalogEntry.Spec.Manifest, input.MCPServerManifest)
+		if err != nil {
+			return err
+		}
+		server.Spec.Manifest = manifest
+		server.Spec.UnsupportedTools = catalogEntry.Spec.UnsupportedTools
 	} else if req.UserIsAdmin() || workspaceID != "" {
 		// If the user is an admin, or if this server is being created in a workspace by a PowerUserPlus,
 		// they can create a server with a manifest that is not in the catalog.
