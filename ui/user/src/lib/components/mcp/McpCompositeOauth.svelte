@@ -22,19 +22,32 @@
 
 	const allAuthenticated = $derived(pending.length === 0);
 
+	// trigger onComplete when done
+	$effect(() => {
+		if (onComplete && allAuthenticated && !loading && !error) {
+			onComplete();
+		}
+	});
+
 	async function fetchParentAndMeta() {
 		try {
 			compositeServer = await ChatService.getSingleOrRemoteMcpServer(compositeMcpId);
 
 			const componentServers = compositeServer?.manifest?.compositeConfig?.componentServers || [];
 			componentInfos = componentServers.reduce(
-				(acc: Record<string, { name?: string; icon?: string }>, c: any) => {
-					acc[c.catalogEntryID] = { name: c.manifest?.name, icon: c.manifest?.icon };
+				(
+					acc: Record<string, { name?: string; icon?: string }>,
+					c: { catalogEntryID: string; manifest?: { name?: string; icon?: string } }
+				) => {
+					acc[c.catalogEntryID] = {
+						name: c.manifest?.name,
+						icon: c.manifest?.icon
+					};
 					return acc;
 				},
 				{}
 			);
-		} catch (err) {
+		} catch (_err) {
 			// ignore; UI will fallback to IDs
 		}
 	}
@@ -47,8 +60,8 @@
 				oauthAuthRequestID: oauthAuthRequestId
 			});
 			pending = data as PendingItem[];
-		} catch (err) {
-			const { message } = parseErrorContent(err);
+		} catch (_err) {
+			const { message } = parseErrorContent(_err);
 			error = message;
 		} finally {
 			loading = false;
@@ -64,7 +77,7 @@
 			const payload: Record<string, { config: Record<string, string>; enabled: boolean }> = {
 				[item.catalogEntryID]: { config: {}, enabled: false }
 			};
-			await ChatService.configureCompositeMcpServer(compositeMcpId, payload as any);
+			await ChatService.configureCompositeMcpServer(compositeMcpId, payload);
 
 			// Refresh pending list
 			await fetchPending();

@@ -92,8 +92,10 @@
 		return url?.trim().length ?? 0 > 0;
 	}
 
-	function isCompositeForm(f: any): f is CompositeLaunchFormData {
-		return f && typeof f === 'object' && 'componentConfigs' in f;
+	function isCompositeForm(f: unknown): f is CompositeLaunchFormData {
+		return (
+			typeof f === 'object' && f !== null && 'componentConfigs' in (f as Record<string, unknown>)
+		);
 	}
 
 	function keyFor(compId: string, k: string) {
@@ -111,7 +113,7 @@
 	function missingRequiredFields(formAny: LaunchFormData | CompositeLaunchFormData) {
 		if (!formAny) return false;
 		if (isCompositeForm(formAny)) {
-			for (const [compId, comp] of Object.entries(formAny.componentConfigs || {})) {
+			for (const comp of Object.values(formAny.componentConfigs || {})) {
 				if (!comp.enabled) continue;
 				const envs = comp.envs ?? [];
 				const headers = comp.headers ?? [];
@@ -269,7 +271,7 @@
 					{/if}
 
 					{#if 'componentConfigs' in form}
-						{#each Object.entries(form.componentConfigs) as [compId, comp]}
+						{#each Object.entries(form.componentConfigs) as [compId, comp] (compId)}
 							{#if componentHasConfig(comp)}
 								<div
 									class="dark:bg-surface2 dark:border-surface3 rounded-lg border border-gray-200"
@@ -340,9 +342,6 @@
 
 										{#if comp.headers && comp.headers.length > 0}
 											{#each comp.headers as header, i (header.key)}
-												{@const highlightRequired = highlightedFields.has(
-													`${compId}:${header.key}`
-												)}
 												<div class="flex flex-col gap-1">
 													<span class="flex items-center gap-2">
 														<label for={`${compId}-${header.key}`}>

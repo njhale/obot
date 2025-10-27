@@ -57,7 +57,7 @@
 			}));
 			return { catalogEntryID: c.catalogEntryID, manifest: c.manifest, toolOverrides };
 		});
-		config.componentServers = componentServers as any;
+		config.componentServers = componentServers as unknown as typeof config.componentServers;
 	}
 
 	// Per-entry configuration dialog state
@@ -100,7 +100,7 @@
 			}));
 			populatedByEntry[entry.id] = true;
 			updateCompositeToolMappings();
-		} catch (err) {
+		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : String(err);
 			if (msg.includes('OAuth')) {
 				const oauthURL = await AdminService.getMcpCatalogToolPreviewsOauth(
@@ -196,21 +196,31 @@
 		_otherSelectors?: string[]
 	) {
 		if (!config) {
-			config = { componentServers: [] } as any;
+			config = { componentServers: [] } as unknown as
+				| CompositeCatalogConfig
+				| CompositeRuntimeConfig;
 		}
 		const existing = new Set((config.componentServers || []).map((c) => c.catalogEntryID));
 		const newComponents = mcpCatalogEntryIds
 			.filter((id) => !existing.has(id))
-			.map((id) => ({ catalogEntryID: id, manifest: {} as any, toolOverrides: [], enabled: true }));
+			.map((id) => ({
+				catalogEntryID: id,
+				manifest: {} as Record<string, unknown>,
+				toolOverrides: [],
+				enabled: true
+			}));
 		if (newComponents.length === 0) return;
-		config.componentServers = [...(config.componentServers || []), ...newComponents] as any;
+		config.componentServers = [
+			...(config.componentServers || []),
+			...newComponents
+		] as unknown as typeof config.componentServers;
 		await loadComponentEntries();
 	}
 
 	function removeServer(entryId: string) {
 		config.componentServers = (config.componentServers || []).filter(
 			(c) => c.catalogEntryID !== entryId
-		) as any;
+		) as unknown as typeof config.componentServers;
 		componentEntries = componentEntries.filter((e) => e.id !== entryId);
 		delete toolsByEntry[entryId];
 		delete populatedByEntry[entryId];
@@ -349,7 +359,7 @@
 	bind:this={searchDialog}
 	onAdd={(mcpCatalogEntryIds, mcpServerIds, otherSelectors) =>
 		handleAdd(mcpCatalogEntryIds, mcpServerIds, otherSelectors)}
-	exclude={['*', 'default', ...config?.componentServers?.map((c) => c.catalogEntryID)]}
+	exclude={['*', 'default', ...(config?.componentServers ?? []).map((c) => c.catalogEntryID)]}
 	type="filter"
 	{mcpEntriesContextFn}
 />
