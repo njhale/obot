@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { MCPServerInfo } from '$lib/services/chat/mcp';
 	import { AlertCircle, LoaderCircle, Server } from 'lucide-svelte';
+	import Toggle from '../Toggle.svelte';
 	import ResponsiveDialog from '../ResponsiveDialog.svelte';
 	import type { Snippet } from 'svelte';
 	import InfoTooltip from '../InfoTooltip.svelte';
@@ -23,7 +24,7 @@
 		hostname?: string;
 		name?: string;
 		icon?: string;
-		enabled?: boolean;
+		disabled?: boolean; // source of truth; checkbox shows Enable and binds to !disabled
 	};
 
 	export type CompositeLaunchFormData = {
@@ -114,7 +115,7 @@
 		if (!formAny) return false;
 		if (isCompositeForm(formAny)) {
 			for (const comp of Object.values(formAny.componentConfigs || {})) {
-				if (!comp.enabled) continue;
+				if (comp.disabled) continue;
 				const envs = comp.envs ?? [];
 				const headers = comp.headers ?? [];
 				if (comp.hostname && !hasUrl(comp.url)) {
@@ -140,7 +141,7 @@
 		const fieldsToHighlight = new Set<string>();
 		if (isCompositeForm(formAny)) {
 			for (const [compId, comp] of Object.entries(formAny.componentConfigs || {})) {
-				if (!comp.enabled) continue;
+				if (comp.disabled) continue;
 				for (const f of comp.envs ?? []) {
 					if (f.required && !f.value) fieldsToHighlight.add(keyFor(compId, f.key));
 				}
@@ -281,10 +282,13 @@
 											<img src={comp.icon} alt={comp.name || compId} class="size-8" />
 										{/if}
 										<div class="font-medium">{comp.name || compId}</div>
-										<label class="ml-auto flex items-center gap-2 text-sm">
-											<input type="checkbox" bind:checked={form.componentConfigs[compId].enabled} />
-											Enable
-										</label>
+										<Toggle
+											checked={!form.componentConfigs[compId].disabled}
+											onChange={(checked) => (form.componentConfigs[compId].disabled = !checked)}
+											label="Enable"
+											labelInline
+											classes={{ label: 'text-sm gap-2' }}
+										/>
 									</div>
 									<div class="border-t border-gray-200 p-3">
 										{#if comp.envs && comp.envs.length > 0}

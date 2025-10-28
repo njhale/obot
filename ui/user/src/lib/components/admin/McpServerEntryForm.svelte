@@ -233,7 +233,7 @@
 			const body: {
 				componentConfigs: Record<
 					string,
-					{ config: Record<string, string>; url: string; enabled: boolean }
+					{ config: Record<string, string>; url: string; disabled: boolean }
 				>;
 			} = { componentConfigs: {} };
 			const composite = configureForm;
@@ -244,7 +244,7 @@
 				body.componentConfigs[compId] = {
 					config: cfg,
 					url: comp.url || '',
-					enabled: !!comp.enabled
+					disabled: !!comp.disabled
 				};
 			}
 			return body;
@@ -343,7 +343,7 @@
 						: {}),
 					name: c.manifest?.name || c.catalogEntryID,
 					icon: c.manifest?.icon,
-					enabled: true
+					disabled: false
 				};
 			}
 			configureForm = { componentConfigs } as CompositeLaunchFormData;

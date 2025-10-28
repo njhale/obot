@@ -382,7 +382,22 @@ func (m *MCPHandler) LaunchServer(req api.Context) error {
 			return fmt.Errorf("failed to list child servers: %w", err)
 		}
 
+		// Build disabled set from parent composite manifest; default is enabled
+		disabledComponents := make(map[string]struct{})
+		if server.Spec.Manifest.CompositeConfig != nil {
+			for _, comp := range server.Spec.Manifest.CompositeConfig.ComponentServers {
+				if comp.Disabled {
+					disabledComponents[comp.CatalogEntryID] = struct{}{}
+				}
+			}
+		}
+
+		enabledAndHealthy := 0
 		for _, component := range componentServers.Items {
+			// Skip if disabled in parent composite config
+			if _, disabled := disabledComponents[component.Spec.MCPServerCatalogEntryName]; disabled {
+				continue
+			}
 			if component.Spec.Manifest.Runtime == types.RuntimeRemote {
 				continue
 			}
@@ -405,6 +420,12 @@ func (m *MCPHandler) LaunchServer(req api.Context) error {
 
 				return fmt.Errorf("failed to launch component MCP server %s: %w", component.Name, err)
 			}
+
+			enabledAndHealthy++
+		}
+
+		if enabledAndHealthy == 0 {
+			return types.NewErrBadRequest("composite server has no enabled and healthy components")
 		}
 
 		return nil
@@ -1149,7 +1170,7 @@ func serverManifestFromCatalogEntryManifest(isAdmin bool, entry types.MCPServerC
 				CatalogEntryID: c.CatalogEntryID,
 				Manifest:       mapped,
 				ToolOverrides:  c.ToolOverrides,
-				Enabled:        c.Enabled,
+				Disabled:       c.Disabled,
 			})
 		}
 
@@ -1644,9 +1665,9 @@ func (m *MCPHandler) configureCompositeServer(req api.Context, compositeServer v
 	// Read configuration from request body
 	var configRequest struct {
 		ComponentConfigs map[string]struct {
-			Config  map[string]string `json:"config"`
-			URL     string            `json:"url"`
-			Enabled *bool             `json:"enabled"`
+			Config   map[string]string `json:"config"`
+			URL      string            `json:"url"`
+			Disabled bool              `json:"disabled"`
 		} `json:"componentConfigs"`
 	}
 	if err := req.Read(&configRequest); err != nil {
@@ -1703,19 +1724,24 @@ func (m *MCPHandler) configureCompositeServer(req api.Context, compositeServer v
 			continue
 		}
 
-		// Determine enabled (default true)
-		enabled := true
-		if componentConfig.Enabled != nil {
-			enabled = *componentConfig.Enabled
-		}
-
-		// Persist enabled state to parent composite manifest if present
+		// Persist disabled state to parent composite manifest if present
 		if idx, ok := parentComps[component.Spec.MCPServerCatalogEntryName]; ok && compositeServer.Spec.Manifest.CompositeConfig != nil {
-			compositeServer.Spec.Manifest.CompositeConfig.ComponentServers[idx].Enabled = enabled
+			compositeServer.Spec.Manifest.CompositeConfig.ComponentServers[idx].Disabled = componentConfig.Disabled
 		}
 
-		if !enabled {
-			// Skip configuring this component
+		if componentConfig.Disabled {
+			// On disable, clear remote URL (if any) and persist; credentials were already cleared above
+			if component.Spec.Manifest.RemoteConfig != nil {
+				component.Spec.Manifest.RemoteConfig.URL = ""
+			}
+			if err := req.Update(&component); err != nil {
+				return fmt.Errorf("failed to update disabled component server %s: %w", component.Name, err)
+			}
+			if compositeServer.Spec.Manifest.CompositeConfig != nil {
+				if err := req.Update(&compositeServer); err != nil {
+					return fmt.Errorf("failed to update composite server disabled flags: %w", err)
+				}
+			}
 			continue
 		}
 
@@ -1929,10 +1955,21 @@ func (m *MCPHandler) revealCompositeServer(req api.Context, compositeServer v1.M
 		return fmt.Errorf("failed to list component servers: %w", err)
 	}
 
+	var compositeConfig types.CompositeRuntimeConfig
+	if compositeServer.Spec.Manifest.CompositeConfig != nil {
+		compositeConfig = *compositeServer.Spec.Manifest.CompositeConfig
+	}
+
+	// Build disabled set from parent composite
+	disabledComponents := make(map[string]bool, len(compositeConfig.ComponentServers))
+	for _, comp := range compositeConfig.ComponentServers {
+		disabledComponents[comp.CatalogEntryID] = comp.Disabled
+	}
+
 	result := map[string]struct {
-		Config map[string]string `json:"config"`
-		URL    string            `json:"url"`
-		Skip   bool              `json:"skip"`
+		Config   map[string]string `json:"config"`
+		URL      string            `json:"url"`
+		Disabled bool              `json:"disabled"`
 	}{}
 
 	// For each component, reveal its credential context and URL
@@ -1957,11 +1994,16 @@ func (m *MCPHandler) revealCompositeServer(req api.Context, compositeServer v1.M
 			url = component.Spec.Manifest.RemoteConfig.URL
 		}
 
-		result[component.Spec.MCPServerCatalogEntryName] = struct {
-			Config map[string]string `json:"config"`
-			URL    string            `json:"url"`
-			Skip   bool              `json:"skip"`
-		}{Config: cfg, URL: url, Skip: false}
+		catalogEntryID := component.Spec.MCPServerCatalogEntryName
+		result[catalogEntryID] = struct {
+			Config   map[string]string `json:"config"`
+			URL      string            `json:"url"`
+			Disabled bool              `json:"disabled"`
+		}{
+			Config:   cfg,
+			URL:      url,
+			Disabled: disabledComponents[catalogEntryID],
+		}
 	}
 
 	return req.Write(map[string]any{"componentConfigs": result})

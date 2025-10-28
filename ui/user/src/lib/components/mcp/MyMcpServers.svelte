@@ -302,7 +302,7 @@
 					icon?: string;
 					hostname?: string;
 					url?: string;
-					enabled?: boolean;
+					disabled?: boolean;
 					envs?: Array<Record<string, unknown> & { key: string; value: string }>;
 					headers?: Array<Record<string, unknown> & { key: string; value: string }>;
 				}
@@ -315,7 +315,7 @@
 					icon: m.icon,
 					hostname: m.remoteConfig?.hostname,
 					url: m.remoteConfig?.fixedURL ?? '',
-					enabled: true,
+					disabled: false,
 					envs: (m.env ?? []).map((e) => ({
 						...(e as unknown as Record<string, unknown>),
 						key: e.key,
@@ -470,7 +470,7 @@
 					icon?: string;
 					hostname?: string;
 					url?: string;
-					enabled?: boolean;
+					disabled?: boolean;
 					envs?: Array<Record<string, unknown> & { key: string; value: string }>;
 					headers?: Array<Record<string, unknown> & { key: string; value: string }>;
 				}
@@ -483,7 +483,7 @@
 					icon: m.icon,
 					hostname: m.remoteConfig?.hostname,
 					url: m.remoteConfig?.fixedURL ?? '',
-					enabled: true,
+					disabled: false,
 					envs: (m.env ?? []).map((e) => ({
 						...(e as unknown as Record<string, unknown>),
 						key: e.key,
@@ -536,7 +536,7 @@
 			if ('componentConfigs' in configureForm) {
 				const payload: Record<
 					string,
-					{ config: Record<string, string>; url?: string; enabled?: boolean }
+					{ config: Record<string, string>; url?: string; disabled?: boolean }
 				> = {};
 				for (const [id, comp] of Object.entries(configureForm.componentConfigs)) {
 					const config: Record<string, string> = {};
@@ -549,7 +549,7 @@
 					payload[id] = {
 						config,
 						url: comp.url?.trim() || undefined,
-						enabled: comp.enabled ?? true
+						disabled: comp.disabled ?? false
 					};
 				}
 
@@ -605,7 +605,7 @@
 					}> = [];
 					const payload: Record<
 						string,
-						{ config: Record<string, string>; url?: string; enabled?: boolean }
+						{ config: Record<string, string>; url?: string; disabled?: boolean }
 					> = {};
 					for (const [id, comp] of Object.entries(configureForm.componentConfigs)) {
 						const url = comp.url?.trim();
@@ -622,7 +622,7 @@
 						]) {
 							if (f.value) config[f.key] = f.value;
 						}
-						payload[id] = { config, url, enabled: comp.enabled ?? true };
+						payload[id] = { config, url, disabled: comp.disabled ?? false };
 					}
 
 					const manifest: Record<string, unknown> = {
@@ -690,7 +690,7 @@
 			// Prefill composite configs using CatalogConfigureForm
 			let initial: Record<
 				string,
-				{ config: Record<string, string>; url?: string; enabled?: boolean }
+				{ config: Record<string, string>; url?: string; disabled?: boolean }
 			> = {};
 			try {
 				const revealed = await ChatService.revealCompositeMcpServer(connectedServer.server.id, {
@@ -699,14 +699,14 @@
 				const rc = revealed as unknown as {
 					componentConfigs?: Record<
 						string,
-						{ config: Record<string, string>; url?: string; enabled?: boolean }
+						{ config: Record<string, string>; url?: string; disabled?: boolean }
 					>;
 				};
 				initial = rc.componentConfigs ?? {};
 			} catch (_error) {
 				initial = {} as Record<
 					string,
-					{ config: Record<string, string>; url?: string; enabled?: boolean }
+					{ config: Record<string, string>; url?: string; disabled?: boolean }
 				>;
 			}
 			selectedEntryOrServer = connectedServer;
@@ -718,7 +718,7 @@
 					icon?: string;
 					hostname?: string;
 					url?: string;
-					enabled?: boolean;
+					disabled?: boolean;
 					envs?: Array<Record<string, unknown> & { key: string; value: string }>;
 					headers?: Array<Record<string, unknown> & { key: string; value: string }>;
 				}
@@ -732,7 +732,7 @@
 					icon: m.icon,
 					hostname: m.remoteConfig?.hostname,
 					url: init?.url ?? m.remoteConfig?.fixedURL ?? '',
-					enabled: init?.enabled ?? true,
+					disabled: init?.disabled ?? false,
 					envs: (m.env ?? []).map((e) => ({
 						...(e as unknown as Record<string, unknown>),
 						key: e.key,

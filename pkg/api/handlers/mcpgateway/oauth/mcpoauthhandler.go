@@ -55,7 +55,7 @@ func (f *MCPOAuthHandlerFactory) CheckForMCPAuth(req api.Context, mcpServer v1.M
 		if mcpServer.Spec.Manifest.CompositeConfig != nil {
 			disabled = make(map[string]struct{}, len(mcpServer.Spec.Manifest.CompositeConfig.ComponentServers))
 			for _, comp := range mcpServer.Spec.Manifest.CompositeConfig.ComponentServers {
-				if !comp.Enabled && comp.CatalogEntryID != "" {
+				if comp.Disabled && comp.CatalogEntryID != "" {
 					disabled[comp.CatalogEntryID] = struct{}{}
 				}
 			}

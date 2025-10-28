@@ -12,7 +12,12 @@
 
 	let { compositeMcpId, oauthAuthRequestId, onComplete }: Props = $props();
 
-	type PendingItem = { mcpServerID: string; catalogEntryID?: string; authURL: string };
+	type PendingItem = {
+		mcpServerID: string;
+		catalogEntryID?: string;
+		authURL: string;
+		loading?: boolean;
+	};
 
 	let compositeServer = $state<MCPCatalogServer>();
 	let componentInfos = $state<Record<string, { name?: string; icon?: string }>>({});
@@ -59,7 +64,7 @@
 			const data = await ChatService.checkCompositeOAuth(compositeMcpId, {
 				oauthAuthRequestID: oauthAuthRequestId
 			});
-			pending = data as PendingItem[];
+			pending = (data as PendingItem[]).map((d) => ({ ...d }));
 		} catch (_err) {
 			const { message } = parseErrorContent(_err);
 			error = message;
@@ -68,22 +73,29 @@
 		}
 	}
 
+	function setItemLoading(id: string, value: boolean) {
+		pending = pending.map((p) => (p.mcpServerID === id ? { ...p, loading: value } : p));
+	}
+
 	async function skip(id: string) {
+		setItemLoading(id, true);
 		try {
 			const item = pending.find((p) => p.mcpServerID === id);
 			if (!item || !item.catalogEntryID) return;
 
-			// Use configure endpoint to set enabled=false for this component
-			const payload: Record<string, { config: Record<string, string>; enabled: boolean }> = {
-				[item.catalogEntryID]: { config: {}, enabled: false }
+			// Use configure endpoint to set disabled=true for this component
+			const payload: Record<string, { config: Record<string, string>; disabled: boolean }> = {
+				[item.catalogEntryID]: { config: {}, disabled: true }
 			};
 			await ChatService.configureCompositeMcpServer(compositeMcpId, payload);
 
-			// Refresh pending list
+			// Re-check pending from server; item should disappear
 			await fetchPending();
 		} catch (err) {
 			const { message } = parseErrorContent(err);
 			error = message;
+		} finally {
+			setItemLoading(id, false);
 		}
 	}
 
@@ -94,8 +106,6 @@
 	}
 
 	onMount(() => {
-		console.error(`MOUNTING COMPOSITE OAUTH FOR ${compositeMcpId}`);
-		console.error(`OAUTH REQUEST ID: ${oauthAuthRequestId}`);
 		fetchParentAndMeta();
 		fetchPending();
 		document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -127,7 +137,7 @@
 			with each service below.
 		</p>
 
-		{#if loading}
+		{#if loading && pending.length === 0}
 			<div class="flex items-center justify-center gap-2 py-8">
 				<LoaderCircle class="size-6 animate-spin" />
 				<span>Loading servers...</span>
@@ -160,7 +170,17 @@
 						</div>
 						<div class="flex items-center gap-2">
 							<a href={item.authURL} target="_blank" class="button-primary">Authenticate</a>
-							<button class="button-text" onclick={() => skip(item.mcpServerID)}>Skip</button>
+							<button
+								class="button-text"
+								disabled={item.loading}
+								onclick={() => skip(item.mcpServerID)}
+							>
+								{#if item.loading}
+									<LoaderCircle class="size-4 animate-spin" />
+								{:else}
+									Skip
+								{/if}
+							</button>
 						</div>
 					</div>
 				{/each}

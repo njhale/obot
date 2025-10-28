@@ -50,23 +50,19 @@ func (h *handler) checkCompositeAuth(req api.Context) error {
 		userID  = req.User.GetUID()
 		pending = make([]pendingComponentAuth, 0, len(componentServers.Items))
 	)
+	// Build disabled set by catalog entry ID for O(1) checks
+	var compositeConfig types.CompositeRuntimeConfig
+	if compositeServer.Spec.Manifest.CompositeConfig != nil {
+		compositeConfig = *compositeServer.Spec.Manifest.CompositeConfig
+	}
+
+	disabledComponents := make(map[string]bool, len(compositeConfig.ComponentServers))
+	for _, comp := range compositeConfig.ComponentServers {
+		disabledComponents[comp.CatalogEntryID] = comp.Disabled
+	}
+
 	for _, componentServer := range componentServers.Items {
-		// Check if this component is enabled in the composite config
-		isEnabled := true // Default to enabled if not found in config
-		if compositeServer.Spec.Manifest.CompositeConfig != nil {
-			for _, comp := range compositeServer.Spec.Manifest.CompositeConfig.ComponentServers {
-				if comp.CatalogEntryID == componentServer.Spec.MCPServerCatalogEntryName {
-					isEnabled = comp.Enabled
-					break
-				}
-			}
-		}
-
-		if !isEnabled {
-			continue
-		}
-
-		if componentServer.Spec.Manifest.Runtime != types.RuntimeRemote {
+		if disabledComponents[componentServer.Spec.MCPServerCatalogEntryName] || componentServer.Spec.Manifest.Runtime != types.RuntimeRemote {
 			continue
 		}
 
@@ -106,5 +102,5 @@ func (h *handler) checkCompositeAuth(req api.Context) error {
 		redirectWithAuthorizeResponse(req, authRequest, code)
 	}
 
-	return nil
+	return req.Write(pending)
 }

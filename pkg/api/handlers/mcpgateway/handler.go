@@ -127,7 +127,7 @@ func (h *Handler) StreamableHTTP(req api.Context) error {
 		disabledComponents := make(map[string]struct{})
 		if mcpServer.Spec.Manifest.CompositeConfig != nil {
 			for _, comp := range mcpServer.Spec.Manifest.CompositeConfig.ComponentServers {
-				if !comp.Enabled {
+				if comp.Disabled {
 					disabledComponents[comp.CatalogEntryID] = struct{}{}
 				}
 			}
