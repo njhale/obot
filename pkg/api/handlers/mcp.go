@@ -17,6 +17,7 @@ import (
 	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/pkg/accesscontrolrule"
 	"github.com/obot-platform/obot/pkg/api"
+	"github.com/obot-platform/obot/pkg/jwt/ephemeral"
 	"github.com/obot-platform/obot/pkg/mcp"
 	"github.com/obot-platform/obot/pkg/projects"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
@@ -38,14 +39,16 @@ type MCPHandler struct {
 	mcpSessionManager *mcp.SessionManager
 	mcpOAuthChecker   MCPOAuthChecker
 	acrHelper         *accesscontrolrule.Helper
+	tokenService      *ephemeral.TokenService
 	serverURL         string
 }
 
-func NewMCPHandler(mcpLoader *mcp.SessionManager, acrHelper *accesscontrolrule.Helper, mcpOAuthChecker MCPOAuthChecker, serverURL string) *MCPHandler {
+func NewMCPHandler(mcpLoader *mcp.SessionManager, acrHelper *accesscontrolrule.Helper, tokenService *ephemeral.TokenService, mcpOAuthChecker MCPOAuthChecker, serverURL string) *MCPHandler {
 	return &MCPHandler{
 		mcpSessionManager: mcpLoader,
 		mcpOAuthChecker:   mcpOAuthChecker,
 		acrHelper:         acrHelper,
+		tokenService:      tokenService,
 		serverURL:         serverURL,
 	}
 }
@@ -384,7 +387,7 @@ func (m *MCPHandler) LaunchServer(req api.Context) error {
 				continue
 			}
 
-			config, err := serverConfigForAction(req, component)
+			config, err := m.serverConfigForAction(req, component)
 			if err != nil {
 				return fmt.Errorf("failed to get config for component server %s: %w", component.Name, err)
 			}
@@ -479,7 +482,7 @@ func (m *MCPHandler) GetOAuthURL(req api.Context) error {
 }
 
 func (m *MCPHandler) GetTools(req api.Context) error {
-	server, serverConfig, caps, err := serverForActionWithCapabilities(req, m.mcpSessionManager)
+	server, serverConfig, caps, err := m.serverForActionWithCapabilities(req)
 	if err != nil {
 		if errors.Is(err, mcp.ErrHealthCheckFailed) || errors.Is(err, mcp.ErrHealthCheckTimeout) {
 			return types.NewErrHTTP(http.StatusServiceUnavailable, "MCP server is not healthy, check configuration for errors")
@@ -613,7 +616,7 @@ func (m *MCPHandler) SetTools(req api.Context) error {
 }
 
 func (m *MCPHandler) GetResources(req api.Context) error {
-	mcpServer, serverConfig, caps, err := serverForActionWithCapabilities(req, m.mcpSessionManager)
+	mcpServer, serverConfig, caps, err := m.serverForActionWithCapabilities(req)
 	if err != nil {
 		if errors.Is(err, mcp.ErrHealthCheckFailed) || errors.Is(err, mcp.ErrHealthCheckTimeout) {
 			return types.NewErrHTTP(http.StatusServiceUnavailable, "MCP server is not healthy, check configuration for errors")
@@ -657,7 +660,7 @@ func (m *MCPHandler) GetResources(req api.Context) error {
 }
 
 func (m *MCPHandler) ReadResource(req api.Context) error {
-	mcpServer, serverConfig, caps, err := serverForActionWithCapabilities(req, m.mcpSessionManager)
+	mcpServer, serverConfig, caps, err := m.serverForActionWithCapabilities(req)
 	if err != nil {
 		if errors.Is(err, mcp.ErrHealthCheckFailed) || errors.Is(err, mcp.ErrHealthCheckTimeout) {
 			return types.NewErrHTTP(http.StatusServiceUnavailable, "MCP server is not healthy, check configuration for errors")
@@ -698,7 +701,7 @@ func (m *MCPHandler) ReadResource(req api.Context) error {
 }
 
 func (m *MCPHandler) GetPrompts(req api.Context) error {
-	mcpServer, serverConfig, caps, err := serverForActionWithCapabilities(req, m.mcpSessionManager)
+	mcpServer, serverConfig, caps, err := m.serverForActionWithCapabilities(req)
 	if err != nil {
 		if errors.Is(err, mcp.ErrHealthCheckFailed) || errors.Is(err, mcp.ErrHealthCheckTimeout) {
 			return types.NewErrHTTP(http.StatusServiceUnavailable, "MCP server is not healthy, check configuration for errors")
@@ -742,7 +745,7 @@ func (m *MCPHandler) GetPrompts(req api.Context) error {
 }
 
 func (m *MCPHandler) GetPrompt(req api.Context) error {
-	mcpServer, serverConfig, caps, err := serverForActionWithCapabilities(req, m.mcpSessionManager)
+	mcpServer, serverConfig, caps, err := m.serverForActionWithCapabilities(req)
 	if err != nil {
 		if errors.Is(err, mcp.ErrHealthCheckFailed) || errors.Is(err, mcp.ErrHealthCheckTimeout) {
 			return types.NewErrHTTP(http.StatusServiceUnavailable, "MCP server is not healthy, check configuration for errors")
@@ -1009,6 +1012,35 @@ func ServerForAction(req api.Context, id string) (v1.MCPServer, mcp.ServerConfig
 	return server, serverConfig, err
 }
 
+func (m *MCPHandler) serverConfigForAction(req api.Context, server v1.MCPServer) (mcp.ServerConfig, error) {
+	if server.Spec.NeedsURL {
+		return mcp.ServerConfig{}, types.NewErrBadRequest("mcp server %s needs to update its URL", server.Name)
+	}
+
+	// Handle composite servers with dedicated auth
+	if server.Spec.Manifest.Runtime == types.RuntimeComposite {
+		// Determine scope using same logic as serverConfigForAction
+		var scope string
+		if server.Spec.MCPCatalogID != "" {
+			scope = server.Spec.MCPCatalogID
+		} else if server.Spec.PowerUserWorkspaceID != "" {
+			scope = server.Spec.PowerUserWorkspaceID
+		} else if server.Spec.ThreadName != "" {
+			scope = server.Spec.ThreadName
+		} else {
+			scope = server.Spec.UserID
+		}
+
+		return mcp.CompositeServerToConfig(m.tokenService, server, m.serverURL, req.User.GetUID(), scope)
+	}
+
+	// For non-composite servers, use the standard logic
+	return serverConfigForAction(req, server)
+}
+
+// serverConfigForAction handles non-composite server configuration.
+// This is used by both internal MCPHandler methods (for non-composite servers) and
+// external callers like the MCP gateway that don't need composite handling.
 func serverConfigForAction(req api.Context, server v1.MCPServer) (mcp.ServerConfig, error) {
 	if server.Spec.NeedsURL {
 		return mcp.ServerConfig{}, types.NewErrBadRequest("mcp server %s needs to update its URL", server.Name)
@@ -1068,13 +1100,18 @@ func serverForAction(req api.Context) (v1.MCPServer, mcp.ServerConfig, error) {
 	return ServerForAction(req, req.PathValue("mcp_server_id"))
 }
 
-func serverForActionWithCapabilities(req api.Context, mcpSessionManager *mcp.SessionManager) (v1.MCPServer, mcp.ServerConfig, nmcp.ServerCapabilities, error) {
-	server, serverConfig, err := serverForAction(req)
+func (m *MCPHandler) serverForActionWithCapabilities(req api.Context) (v1.MCPServer, mcp.ServerConfig, nmcp.ServerCapabilities, error) {
+	var server v1.MCPServer
+	if err := req.Get(&server, req.PathValue("mcp_server_id")); err != nil {
+		return server, mcp.ServerConfig{}, nmcp.ServerCapabilities{}, err
+	}
+
+	serverConfig, err := m.serverConfigForAction(req, server)
 	if err != nil {
 		return server, serverConfig, nmcp.ServerCapabilities{}, err
 	}
 
-	caps, err := mcpSessionManager.ServerCapabilities(req.Context(), req.User.GetUID(), server, serverConfig)
+	caps, err := m.mcpSessionManager.ServerCapabilities(req.Context(), req.User.GetUID(), server, serverConfig)
 	return server, serverConfig, caps, err
 }
 

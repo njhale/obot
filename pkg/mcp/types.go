@@ -296,3 +296,21 @@ func ProjectServerToConfig(tokenService *ephemeral.TokenService, projectMCPServe
 		Runtime:      types.RuntimeRemote,
 	}, nil
 }
+
+func CompositeServerToConfig(tokenService *ephemeral.TokenService, mcpServer v1.MCPServer, baseURL, userID, scope string) (ServerConfig, error) {
+	token, err := tokenService.NewToken(ephemeral.TokenContext{
+		UserID:     userID,
+		UserGroups: []string{types.GroupBasic},
+	})
+	if err != nil {
+		return ServerConfig{}, fmt.Errorf("failed to create token: %w", err)
+	}
+
+	return ServerConfig{
+		URL:          fmt.Sprintf("%s/mcp-connect/%s", baseURL, mcpServer.Name),
+		Headers:      []string{fmt.Sprintf("Authorization=Bearer %s", token)},
+		Scope:        fmt.Sprintf("%s-%s", mcpServer.Name, scope),
+		AllowedTools: []string{},
+		Runtime:      types.RuntimeRemote,
+	}, nil
+}
