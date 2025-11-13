@@ -1157,9 +1157,6 @@ func serverManifestFromCatalogEntryManifest(
 		if entry.CompositeConfig == nil {
 			return types.MCPServerManifest{}, types.NewErrBadRequest("composite configuration is required for composite catalog entry")
 		}
-		if input.CompositeConfig == nil {
-			return types.MCPServerManifest{}, types.NewErrBadRequest("composite configuration is required for composite runtime")
-		}
 
 		result := types.MCPServerManifest{
 			Name:        entry.Name,
@@ -1775,7 +1772,7 @@ func (m *MCPHandler) configureCompositeServer(req api.Context, compositeServer v
 
 				// Validate the manifest with the processed URL
 				parentManifest.RemoteConfig.URL = finalURL
-			} else if parentManifest.RemoteConfig.Hostname != "" && parentManifest.RemoteConfig.URL == "" && config.URL != "" {
+			} else if parentManifest.RemoteConfig.Hostname != "" && config.URL != "" {
 				userURL := config.URL
 				if !strings.HasPrefix(userURL, "http") {
 					userURL = "https://" + userURL
@@ -3404,6 +3401,7 @@ func (m *MCPHandler) TriggerUpdate(req api.Context) error {
 
 // triggerCompositeUpdate upgrades a composite server and all its component servers from the latest catalog entry
 func (m *MCPHandler) triggerCompositeUpdate(req api.Context, server v1.MCPServer, entry v1.MCPServerCatalogEntry) error {
+	// Get the new manifest from the catalog entry
 	manifest, err := serverManifestFromCatalogEntryManifest(
 		req.UserIsAdmin(),
 		entry.Spec.Manifest,
