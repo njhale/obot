@@ -339,14 +339,6 @@ export async function isMCPCatalogServerOauthNeeded(
 	return false;
 }
 
-export async function deconfigureMCPCatalogServer(
-	catalogID: string,
-	serverID: string,
-	opts?: { fetch?: Fetcher }
-): Promise<void> {
-	await doPost(`/mcp-catalogs/${catalogID}/servers/${serverID}/deconfigure`, {}, opts);
-}
-
 export async function generateMcpCatalogEntryToolPreviews(
 	catalogID: string,
 	entryID: string,

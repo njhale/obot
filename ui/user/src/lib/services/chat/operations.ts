@@ -1444,14 +1444,6 @@ export async function configureCompositeMcpServer(
 	return response;
 }
 
-export async function deconfigureSingleOrRemoteMcpServer(id: string): Promise<void> {
-	await doPost(`/mcp-servers/${id}/deconfigure`, {});
-}
-
-export async function deconfigureCompositeMcpServer(id: string): Promise<void> {
-	return deconfigureSingleOrRemoteMcpServer(id);
-}
-
 // Update any MCP server manifest (used for composite skips)
 export async function updateMcpServerManifest(
 	id: string,
