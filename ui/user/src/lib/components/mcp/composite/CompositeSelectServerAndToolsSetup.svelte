@@ -139,6 +139,7 @@
 		body: { config?: Record<string, string>; url?: string } = { config: {}, url: '' },
 		options?: { compositeEntryId?: string; componentId?: string }
 	) {
+		console.log(`fetchSingleRemoteTools('${body.url}')`);
 		const useCompositePreview = Boolean(options?.compositeEntryId && options?.componentId);
 		const resp = useCompositePreview
 			? await AdminService.generateMcpCompositeComponentToolPreviews(
@@ -196,6 +197,7 @@
 			const isCatalogEntry = 'isCatalogEntry' in configuringEntry;
 			const useCompositePreview = isCatalogEntry && Boolean(compositeEntryId && componentId);
 
+			console.log(`submitting with URL: '${body.url}'`);
 			tools = isCatalogEntry
 				? await fetchSingleRemoteTools(configuringEntry.id, catalogId, body, {
 						compositeEntryId: useCompositePreview ? compositeEntryId : undefined,

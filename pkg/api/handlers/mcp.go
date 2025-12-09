@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gptscript-ai/go-gptscript"
+	"github.com/gptscript-ai/gptscript/pkg/hash"
 	nmcp "github.com/nanobot-ai/nanobot/pkg/mcp"
 	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/pkg/accesscontrolrule"
@@ -2011,7 +2012,14 @@ func (m *MCPHandler) configureCompositeServer(req api.Context, compositeServer v
 		}
 
 		// Persist disabled state to parent composite manifest if present
-		if idx, ok := parentComps[component.Spec.MCPServerCatalogEntryName]; ok && compositeServer.Spec.Manifest.CompositeConfig != nil {
+		if idx, ok := parentComps[component.Spec.MCPServerCatalogEntryName]; ok {
+			parentComponent := compositeServer.Spec.Manifest.CompositeConfig.ComponentServers[idx]
+			if manifest := parentComponent.Manifest; manifest.Runtime == types.RuntimeRemote && manifest.RemoteConfig != nil {
+				if componentConfig.URL != "" && manifest.RemoteConfig.URL != componentConfig.URL {
+					manifest.RemoteConfig.URL = componentConfig.URL
+				}
+			}
+
 			compositeServer.Spec.Manifest.CompositeConfig.ComponentServers[idx].Disabled = componentConfig.Disabled
 		}
 
@@ -3652,6 +3660,9 @@ func (m *MCPHandler) TriggerUpdate(req api.Context) error {
 
 // triggerCompositeUpdate upgrades a composite server and all its component servers from the latest catalog entry
 func (m *MCPHandler) triggerCompositeUpdate(req api.Context, server v1.MCPServer, entry v1.MCPServerCatalogEntry) error {
+	// Hash the composite server's original manifest to determine if it's safe to update it on conflict
+	oldManifestHash := hash.Digest(server.Spec.Manifest)
+
 	// Build fresh manifest with user URLs applied
 	updatedManifest, err := serverManifestFromCatalogEntryManifest(
 		req.UserIsAdmin(),
@@ -3669,31 +3680,24 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, server v1.MCPServer
 		entryComponents[entryComponent.ComponentID()] = entryComponent
 	}
 
-	// withRemoteConstraints applies the matching entry component hostname constraints (if any) to servers with remote runtimes.
+	// withHostnameConstraints applies the matching entry component hostname constraints (if any) to servers with remote runtimes.
 	// If the server's runtime is not remote, or there are no hostname constraints on the entry, it returns the unmodified server.
-	withRemoteConstraints := func(server v1.MCPServer, componentID string) v1.MCPServer {
-		entryComponent, ok := entryComponents[componentID]
-		if runtime := server.Spec.Manifest.Runtime; !ok ||
-			runtime != entryComponent.Manifest.Runtime ||
-			runtime != types.RuntimeRemote {
+	withHostnameConstraints := func(server v1.MCPServer) v1.MCPServer {
+		runtime, config := server.Spec.Manifest.Runtime, server.Spec.Manifest.RemoteConfig
+		if runtime != types.RuntimeRemote || config == nil {
 			return server
 		}
 
-		if entryConfig := entryComponent.Manifest.RemoteConfig; entryConfig != nil && entryConfig.Hostname != "" {
-			// Check if the server's URL matches the new hostname requirement
-			if serverConfig := server.Spec.Manifest.RemoteConfig; serverConfig != nil && serverConfig.URL != "" {
-				hostnameMismatchErr := types.ValidateURLHostname(serverConfig.URL, entryConfig.Hostname)
+		if config.Hostname != "" {
+			if config.URL != "" {
+				hostnameMismatchErr := types.ValidateURLHostname(config.URL, config.Hostname)
 				server.Spec.NeedsURL = hostnameMismatchErr != nil
 				if server.Spec.NeedsURL {
-					server.Spec.PreviousURL = serverConfig.URL
-					server.Spec.Manifest.URL = ""
+					server.Spec.PreviousURL = config.URL
+					server.Spec.Manifest.RemoteConfig.URL = ""
 				}
 			} else {
-				// No current URL, needs one
 				server.Spec.NeedsURL = true
-				server.Spec.Manifest.RemoteConfig = &types.RemoteRuntimeConfig{
-					Headers: entryConfig.Headers,
-				}
 			}
 		}
 
@@ -3736,7 +3740,7 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, server v1.MCPServer
 	// 3. Delete removed component servers and instances
 
 	// Update existing components and create new ones
-	for _, component := range updatedManifest.CompositeConfig.ComponentServers {
+	for i, component := range updatedManifest.CompositeConfig.ComponentServers {
 		if component.MCPServerID != "" {
 			// Multi-user component
 			if _, exists := existingInstances[component.MCPServerID]; !exists {
@@ -3771,7 +3775,7 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, server v1.MCPServer
 		// Catalog entry component
 		if existingServer, exists := existingServers[component.CatalogEntryID]; !exists {
 			// New server, create it
-			newServer := withRemoteConstraints(v1.MCPServer{
+			newServer := withHostnameConstraints(v1.MCPServer{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: system.MCPServerPrefix,
 					Namespace:    server.Namespace,
@@ -3783,7 +3787,10 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, server v1.MCPServer
 					UserID:                    server.Spec.UserID,
 					CompositeName:             server.Name,
 				},
-			}, component.CatalogEntryID)
+			})
+
+			// Save any manifest changes that resulted from applying hostname constraints to the server
+			updatedManifest.CompositeConfig.ComponentServers[i].Manifest = newServer.Spec.Manifest
 
 			addExtractedEnvVars(&newServer)
 			if err := req.Create(&newServer); err != nil {
@@ -3795,12 +3802,25 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, server v1.MCPServer
 				return err
 			}
 
-			existingServer.Spec.Manifest = component.Manifest
-			existingServer = withRemoteConstraints(existingServer, component.CatalogEntryID)
-			addExtractedEnvVars(&existingServer)
-			if err := req.Update(&existingServer); err != nil {
-				return fmt.Errorf("failed to update component server %s: %w", existingServer.Name, err)
-			}
+			retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+				var updatedServer v1.MCPServer
+				if err := req.Get(&updatedServer, existingServer.Name); err != nil {
+					return err
+				}
+
+				updatedServer.Spec.Manifest = component.Manifest
+				updatedServer = withHostnameConstraints(updatedServer)
+
+				// Save any manifest changes that resulted from applying hostname constraints to the server
+				updatedManifest.CompositeConfig.ComponentServers[i].Manifest = updatedServer.Spec.Manifest
+
+				addExtractedEnvVars(&existingServer)
+				if err := req.Update(&existingServer); err != nil {
+					return fmt.Errorf("failed to update component server %s: %w", existingServer.Name, err)
+				}
+
+				return nil
+			})
 		}
 
 		// Remove the server to build the list of existing servers to delete
@@ -3821,10 +3841,26 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, server v1.MCPServer
 		}
 	}
 
-	// Update the composite server manifest and server
-	server.Spec.Manifest = updatedManifest
-	server.Spec.UnsupportedTools = entry.Spec.UnsupportedTools
-	return req.Update(&server)
+	// Update the composite server manifest
+	return wait.ExponentialBackoff(retry.DefaultBackoff, func() (bool, error) {
+		var latest v1.MCPServer
+		if err := req.Get(&latest, server.Name); err != nil {
+			return false, err
+		}
+
+		if hash.Digest(latest.Spec.Manifest) == oldManifestHash {
+			return false, types.NewErrHTTP(http.StatusConflict, "manifest changed before update could finish")
+		}
+
+		latest.Spec.Manifest = updatedManifest
+
+		updateErr := req.Update(&latest)
+		if apierrors.IsConflict(updateErr) {
+			return false, nil
+		}
+
+		return updateErr == nil, updateErr
+	})
 }
 
 // ListServerInstances returns all instances for all servers within a specific catalog

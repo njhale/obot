@@ -237,18 +237,22 @@
 				await ChatService.updateRemoteMcpServerUrl(server.id, configureForm.url.trim());
 			}
 
+			let configured = false;
 			if (server.manifest.runtime === 'composite') {
 				const payload = convertCompositeLaunchFormDataToPayload(
 					configureForm as CompositeLaunchFormData
 				);
 				await ChatService.configureCompositeMcpServer(server.id, payload);
-				configDialog?.close();
+				configured = true;
 			} else {
 				const secretValues = convertEnvHeadersToRecord(configureForm.envs, configureForm.headers);
 				await ChatService.configureSingleOrRemoteMcpServer(server.id, secretValues);
-				configDialog?.close();
-				currentConfigReq = null;
+				configured = true;
+			}
+
+			if (configured) {
 				try {
+					// Refresh project MCPs to clear updated required notifications
 					const refreshed = await ChatService.listProjectMCPs(assistantId, projectId);
 					projectMcps.items = await validateOauthProjectMcps(
 						assistantId,
@@ -258,6 +262,10 @@
 					);
 				} catch {
 					// ignore refresh errors
+				} finally {
+					// Close the configuration dialog
+					configDialog?.close();
+					currentConfigReq = null;
 				}
 			}
 		} catch (error) {

@@ -29,6 +29,7 @@ export interface MCPCatalogSource {
 
 export interface RemoteRuntimeConfigAdmin {
 	url: string;
+	hostname?: string;
 	headers?: MCPCatalogEntryFieldManifest[];
 }
 

@@ -8495,9 +8495,16 @@ func schema_obot_platform_obot_apiclient_types_RemoteRuntimeConfig(ref common.Re
 							Format:  "",
 						},
 					},
-					"headers": {
+					"hostname": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Required: Full URL to remote MCP server",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"headers": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Optional: Hostname constraint the URL conforms to",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{

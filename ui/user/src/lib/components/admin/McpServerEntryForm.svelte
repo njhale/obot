@@ -953,9 +953,7 @@
 	{:else if oauthURLs && Object.keys(oauthURLs).length > 0}
 		<!-- Composite server OAuth - multiple components -->
 		<div class="flex flex-col gap-3">
-			<p class="text-on-surface1 text-sm">
-				Multiple components require authentication. Please authenticate each component below:
-			</p>
+			<p class="text-on-surface1 text-sm">Please authenticate with the component below:</p>
 			{#each Object.entries(oauthURLs).filter(([id]) => !authenticatedComponents.has(id)) as [componentId, url] (componentId)}
 				{@const component = entry?.manifest?.compositeConfig?.componentServers?.find(
 					(c) => c.catalogEntryID === componentId || c.mcpServerID === componentId
