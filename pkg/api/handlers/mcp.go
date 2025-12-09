@@ -1137,7 +1137,7 @@ func mcpServerOrInstanceFromConnectURL(req api.Context, id string) (v1.MCPServer
 			}
 
 			// Convert the catalog entry manifest to a server manifest. Treat the user as non-admin always.
-			manifest, err := serverManifestFromCatalogEntryManifest(false, entry.Spec.Manifest, types.MCPServerManifest{})
+			manifest, err := serverManifestFromCatalogEntryManifest(false, false, entry.Spec.Manifest, types.MCPServerManifest{})
 			if err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrNotFound("user has not configured an MCP server for catalog entry %s", id)
 			}
@@ -1413,6 +1413,7 @@ func serverForActionWithCapabilities(req api.Context, mcpSessionManager *mcp.Ses
 // If the user is an admin, they can override anything from the catalog entry.
 func serverManifestFromCatalogEntryManifest(
 	isAdmin bool,
+	disableHostnameValidation bool,
 	entry types.MCPServerCatalogEntryManifest,
 	input types.MCPServerManifest,
 ) (types.MCPServerManifest, error) {
@@ -1463,7 +1464,7 @@ func serverManifestFromCatalogEntryManifest(
 			// Map the catalog entry to a server manifest.
 			// Pass the disabled field to bypass hostname validation for disabled remote components.
 			// This is necessary because users don't need to provide required configuration for disabled components.
-			resultComponentManifest, err := types.MapCatalogEntryToServer(entryComponent.Manifest, userURL, inputComponent.Disabled)
+			resultComponentManifest, err := types.MapCatalogEntryToServer(entryComponent.Manifest, userURL, inputComponent.Disabled || disableHostnameValidation)
 			if err != nil {
 				return types.MCPServerManifest{}, fmt.Errorf("failed to convert component manifest: %w", err)
 			}
@@ -1614,7 +1615,7 @@ func (m *MCPHandler) CreateServer(req api.Context) error {
 			return types.NewErrForbidden("user does not have access to MCP server catalog entry")
 		}
 
-		manifest, err := serverManifestFromCatalogEntryManifest(req.UserIsAdmin(), catalogEntry.Spec.Manifest, input.MCPServerManifest)
+		manifest, err := serverManifestFromCatalogEntryManifest(req.UserIsAdmin(), false, catalogEntry.Spec.Manifest, input.MCPServerManifest)
 		if err != nil {
 			return err
 		}
@@ -3654,6 +3655,7 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, server v1.MCPServer
 	// Build fresh manifest with user URLs applied
 	updatedManifest, err := serverManifestFromCatalogEntryManifest(
 		req.UserIsAdmin(),
+		true,
 		entry.Spec.Manifest,
 		server.Spec.Manifest,
 	)
@@ -3661,9 +3663,41 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, server v1.MCPServer
 		return err
 	}
 
-	// Validate the new manifest
-	if err := validation.ValidateServerManifest(updatedManifest); err != nil {
-		return types.NewErrBadRequest("validation failed: %v", err)
+	// Create an index of entry components to handle quick URL constraints for remote runtimes
+	entryComponents := make(map[string]types.CatalogComponentServer, len(entry.Spec.Manifest.CompositeConfig.ComponentServers))
+	for _, entryComponent := range entry.Spec.Manifest.CompositeConfig.ComponentServers {
+		entryComponents[entryComponent.ComponentID()] = entryComponent
+	}
+
+	// withRemoteConstraints applies the matching entry component hostname constraints (if any) to servers with remote runtimes.
+	// If the server's runtime is not remote, or there are no hostname constraints on the entry, it returns the unmodified server.
+	withRemoteConstraints := func(server v1.MCPServer, componentID string) v1.MCPServer {
+		entryComponent, ok := entryComponents[componentID]
+		if runtime := server.Spec.Manifest.Runtime; !ok ||
+			runtime != entryComponent.Manifest.Runtime ||
+			runtime != types.RuntimeRemote {
+			return server
+		}
+
+		if entryConfig := entryComponent.Manifest.RemoteConfig; entryConfig != nil && entryConfig.Hostname != "" {
+			// Check if the server's URL matches the new hostname requirement
+			if serverConfig := server.Spec.Manifest.RemoteConfig; serverConfig != nil && serverConfig.URL != "" {
+				hostnameMismatchErr := types.ValidateURLHostname(serverConfig.URL, entryConfig.Hostname)
+				server.Spec.NeedsURL = hostnameMismatchErr != nil
+				if server.Spec.NeedsURL {
+					server.Spec.PreviousURL = serverConfig.URL
+					server.Spec.Manifest.URL = ""
+				}
+			} else {
+				// No current URL, needs one
+				server.Spec.NeedsURL = true
+				server.Spec.Manifest.RemoteConfig = &types.RemoteRuntimeConfig{
+					Headers: entryConfig.Headers,
+				}
+			}
+		}
+
+		return server
 	}
 
 	// Load all existing component servers
@@ -3737,7 +3771,7 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, server v1.MCPServer
 		// Catalog entry component
 		if existingServer, exists := existingServers[component.CatalogEntryID]; !exists {
 			// New server, create it
-			newServer := v1.MCPServer{
+			newServer := withRemoteConstraints(v1.MCPServer{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: system.MCPServerPrefix,
 					Namespace:    server.Namespace,
@@ -3749,7 +3783,7 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, server v1.MCPServer
 					UserID:                    server.Spec.UserID,
 					CompositeName:             server.Name,
 				},
-			}
+			}, component.CatalogEntryID)
 
 			addExtractedEnvVars(&newServer)
 			if err := req.Create(&newServer); err != nil {
@@ -3762,6 +3796,7 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, server v1.MCPServer
 			}
 
 			existingServer.Spec.Manifest = component.Manifest
+			existingServer = withRemoteConstraints(existingServer, component.CatalogEntryID)
 			addExtractedEnvVars(&existingServer)
 			if err := req.Update(&existingServer); err != nil {
 				return fmt.Errorf("failed to update component server %s: %w", existingServer.Name, err)
