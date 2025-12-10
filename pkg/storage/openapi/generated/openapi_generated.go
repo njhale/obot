@@ -8495,9 +8495,24 @@ func schema_obot_platform_obot_apiclient_types_RemoteRuntimeConfig(ref common.Re
 							Format:  "",
 						},
 					},
-					"hostname": {
+					"isTemplate": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Required: Full URL to remote MCP server",
+							Default:     false,
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"urlTemplate": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Optional: Whether the URL is a template",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"hostname": {
+						SchemaProps: spec.SchemaProps{
+							Description: "URL template for user URLs",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -8514,14 +8529,6 @@ func schema_obot_platform_obot_apiclient_types_RemoteRuntimeConfig(ref common.Re
 									},
 								},
 							},
-						},
-					},
-					"isTemplate": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Optional",
-							Default:     false,
-							Type:        []string{"boolean"},
-							Format:      "",
 						},
 					},
 				},
@@ -14899,6 +14906,13 @@ func schema_storage_apis_obotobotai_v1_MCPServerStatus(ref common.ReferenceCallb
 					"auditLogTokenHash": {
 						SchemaProps: spec.SchemaProps{
 							Description: "AuditLogTokenHash is the hash of the token used to submit audit logs.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"deployedCompositeConfigHash": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DeployedCompositeConfigHash is the hash of the CompositeRuntimeConfig used the last time all component servers were successfully deployed. This field is only populated for composite MCP servers.",
 							Type:        []string{"string"},
 							Format:      "",
 						},

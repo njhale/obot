@@ -145,6 +145,9 @@ type MCPServerStatus struct {
 	K8sSettingsHash string `json:"k8sSettingsHash,omitempty"`
 	// AuditLogTokenHash is the hash of the token used to submit audit logs.
 	AuditLogTokenHash string `json:"auditLogTokenHash,omitempty"`
+	// DeployedCompositeConfigHash is the hash of the CompositeRuntimeConfig used the last time all component servers were successfully deployed.
+	// This field is only populated for composite MCP servers.
+	DeployedCompositeConfigHash string `json:"deployedCompositeConfigHash,omitempty"`
 }
 
 type DeploymentCondition struct {
