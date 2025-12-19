@@ -49,10 +49,32 @@
 	let defaultModel = $derived(threadDefaultModel ?? projectDefaultModel);
 	let defaultModelProvider = $derived(threadDefaultModelProvider ?? projectDefaultModelProvider);
 
+	let modelProvidersMap = new SvelteMap<string, ModelProvider>();
+	let modelsMap = new SvelteMap<string, Model>();
+
+	// Calculate fallback model when default model is empty but user has allowed models
+	let fallbackModel = $derived.by(() => {
+		// Only use fallback if default model is empty/missing
+		if (defaultModel) return undefined;
+		// Find first allowed model that exists in modelsMap
+		for (const modelId of allowedModels) {
+			const model = modelsMap.get(modelId);
+			if (model) {
+				return { id: model.id, provider: model.modelProvider };
+			}
+		}
+		return undefined;
+	});
+
 	// Selected model provider & model for the current thread
-	let threadModel = $derived(threadType?.model ?? threadDefaultModel ?? defaultModel);
+	let threadModel = $derived(
+		threadType?.model ?? threadDefaultModel ?? defaultModel ?? fallbackModel?.id
+	);
 	let threadModelProvider = $derived(
-		threadType?.modelProvider ?? threadDefaultModelProvider ?? defaultModelProvider
+		threadType?.modelProvider ??
+			threadDefaultModelProvider ??
+			defaultModelProvider ??
+			fallbackModel?.provider
 	);
 
 	const isDefaultModelSelected = $derived(
@@ -208,9 +230,6 @@
 		};
 	});
 
-	let modelProvidersMap = new SvelteMap<string, ModelProvider>();
-	let modelsMap = new SvelteMap<string, Model>();
-
 	$effect(() => {
 		loadModelProviders();
 		loadModels();
@@ -295,6 +314,8 @@
 				{modelsMap.get(threadModel)?.name || threadModel}
 			{:else if defaultModel}
 				{modelsMap.get(defaultModel)?.name || defaultModel}
+			{:else if fallbackModel}
+				{modelsMap.get(fallbackModel.id)?.name || fallbackModel.id}
 			{:else}
 				No Default Model
 			{/if}

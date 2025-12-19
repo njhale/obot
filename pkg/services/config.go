@@ -48,6 +48,7 @@ import (
 	"github.com/obot-platform/obot/pkg/jwt/persistent"
 	"github.com/obot-platform/obot/pkg/logutil"
 	"github.com/obot-platform/obot/pkg/mcp"
+	"github.com/obot-platform/obot/pkg/modelpermissionrule"
 	"github.com/obot-platform/obot/pkg/proxy"
 	"github.com/obot-platform/obot/pkg/storage"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
@@ -156,6 +157,9 @@ type Services struct {
 
 	// Used for indexed lookups of access control rules.
 	AccessControlRuleHelper *accesscontrolrule.Helper
+
+	// Used for indexed lookups of model permission rules.
+	ModelPermissionRuleHelper *modelpermissionrule.Helper
 
 	WebhookHelper *mcp.WebhookHelper
 
@@ -578,6 +582,62 @@ func New(ctx context.Context, config Config) (*Services, error) {
 
 	acrHelper := accesscontrolrule.NewAccessControlRuleHelper(acrInformer.GetIndexer(), r.Backend())
 
+	// Set up ModelPermissionRule indexer
+	mprGVK, err := r.Backend().GroupVersionKindFor(&v1.ModelPermissionRule{})
+	if err != nil {
+		return nil, err
+	}
+
+	mprInformer, err := r.Backend().GetInformerForKind(ctx, mprGVK)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = mprInformer.AddIndexers(map[string]gocache.IndexFunc{
+		"user-ids": func(obj any) ([]string, error) {
+			mpr := obj.(*v1.ModelPermissionRule)
+			var results []string
+			for _, subject := range mpr.Spec.Manifest.Subjects {
+				if subject.Type == apiclienttypes.SubjectTypeUser {
+					results = append(results, subject.ID)
+				}
+			}
+			return results, nil
+		},
+		"group-ids": func(obj any) ([]string, error) {
+			mpr := obj.(*v1.ModelPermissionRule)
+			var results []string
+			for _, subject := range mpr.Spec.Manifest.Subjects {
+				if subject.Type == apiclienttypes.SubjectTypeGroup {
+					results = append(results, subject.ID)
+				}
+			}
+			return results, nil
+		},
+		"subject-selectors": func(obj any) ([]string, error) {
+			mpr := obj.(*v1.ModelPermissionRule)
+			var results []string
+			for _, subject := range mpr.Spec.Manifest.Subjects {
+				if subject.Type == apiclienttypes.SubjectTypeSelector {
+					results = append(results, subject.ID)
+				}
+			}
+			return results, nil
+		},
+		"model-ids": func(obj any) ([]string, error) {
+			mpr := obj.(*v1.ModelPermissionRule)
+			var results []string
+			for _, model := range mpr.Spec.Manifest.Models {
+				results = append(results, model.ModelID)
+			}
+			return results, nil
+		},
+	}); err != nil {
+		return nil, err
+	}
+
+	mprHelper := modelpermissionrule.NewHelper(mprInformer.GetIndexer())
+
 	// Set up MCPWebhookValidation indexer
 	mcpWebhookValidationGVK, err := r.Backend().GroupVersionKindFor(&v1.MCPWebhookValidation{})
 	if err != nil {
@@ -643,7 +703,7 @@ func New(ctx context.Context, config Config) (*Services, error) {
 		return nil, err
 	}
 
-	gatewayServer, err := gserver.New(ctx, gatewayDB, persistentTokenServer, providerDispatcher, gserver.Options(config.GatewayConfig))
+	gatewayServer, err := gserver.New(ctx, gatewayDB, persistentTokenServer, providerDispatcher, mprHelper, gserver.Options(config.GatewayConfig))
 	if err != nil {
 		return nil, err
 	}
@@ -807,14 +867,15 @@ func New(ctx context.Context, config Config) (*Services, error) {
 			TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
 			UserInfoEndpoint:                  fmt.Sprintf("%s/oauth/userinfo", config.Hostname),
 		},
-		AccessControlRuleHelper: acrHelper,
-		WebhookHelper:           webhookHelper,
-		LocalK8sConfig:          localK8sConfig,
-		MCPServerNamespace:      config.MCPNamespace,
-		K8sSettingsFromHelm:     helmK8sSettings,
-		DisableUpdateCheck:      config.DisableUpdateCheck,
-		MCPRuntimeBackend:       config.MCPRuntimeBackend,
-		RegistryNoAuth:          registryNoAuth,
+		AccessControlRuleHelper:   acrHelper,
+		ModelPermissionRuleHelper: mprHelper,
+		WebhookHelper:             webhookHelper,
+		LocalK8sConfig:            localK8sConfig,
+		MCPServerNamespace:        config.MCPNamespace,
+		K8sSettingsFromHelm:       helmK8sSettings,
+		DisableUpdateCheck:        config.DisableUpdateCheck,
+		MCPRuntimeBackend:         config.MCPRuntimeBackend,
+		RegistryNoAuth:            registryNoAuth,
 	}, nil
 }
 

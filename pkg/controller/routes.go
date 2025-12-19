@@ -133,6 +133,7 @@ func (c *Controller) setupRoutes() {
 	// Agents
 	root.Type(&v1.Agent{}).HandlerFunc(agents.CreateWorkspaceAndKnowledgeSet)
 	root.Type(&v1.Agent{}).HandlerFunc(agents.BackPopulateAuthStatus)
+	root.Type(&v1.Agent{}).HandlerFunc(agents.MigrateAllowedModels)
 	root.Type(&v1.Agent{}).HandlerFunc(alias.AssignAlias)
 	root.Type(&v1.Agent{}).HandlerFunc(toolInfo.SetToolInfoStatus)
 	root.Type(&v1.Agent{}).HandlerFunc(toolInfo.RemoveUnneededCredentials)
