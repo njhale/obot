@@ -7,6 +7,7 @@ import (
 	"github.com/obot-platform/obot/pkg/api"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -130,8 +131,12 @@ func (*ModelPermissionRuleHandler) validateModels(req api.Context, models []type
 		}
 
 		var m v1.Model
-		if err := req.Get(&m, model.ModelID); err != nil {
-			return types.NewErrBadRequest("model %s not found: %v", model.ModelID, err)
+		if err := req.Get(&m, model.ID); err != nil {
+			if apierrors.IsNotFound(err) {
+				return types.NewErrBadRequest("model %s not found: %v", model.ID, err)
+			}
+
+			return err
 		}
 	}
 	return nil

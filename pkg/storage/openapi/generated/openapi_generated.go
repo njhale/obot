@@ -6276,15 +6276,16 @@ func schema_obot_platform_obot_apiclient_types_ModelResource(ref common.Referenc
 			SchemaProps: spec.SchemaProps{
 				Type: []string{"object"},
 				Properties: map[string]spec.Schema{
-					"modelID": {
+					"id": {
 						SchemaProps: spec.SchemaProps{
-							Default: "",
-							Type:    []string{"string"},
-							Format:  "",
+							Description: "ID is the unique identifier of the model resource. It either be: - the wildcard '*', which selects all available models - the model ID of a specific model\n\nWhen a model ID is provided, it must match the ID field of an existing referenced model.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 				},
-				Required: []string{"modelID"},
+				Required: []string{"id"},
 			},
 		},
 	}

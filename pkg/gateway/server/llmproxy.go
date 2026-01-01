@@ -24,6 +24,7 @@ import (
 	"github.com/obot-platform/obot/pkg/gateway/client"
 	"github.com/obot-platform/obot/pkg/gateway/server/dispatcher"
 	"github.com/obot-platform/obot/pkg/gateway/types"
+	"github.com/obot-platform/obot/pkg/modelpermissionrule"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	"github.com/tidwall/gjson"
@@ -86,7 +87,7 @@ func (s *Server) dispatchLLMProxy(req api.Context) error {
 			}
 		}
 
-		m, err := getModelProviderForModel(req.Context(), req.Storage, token.Namespace, modelStr)
+		m, err := getModelFromReference(req.Context(), req.Storage, token.Namespace, modelStr)
 		if err != nil {
 			return fmt.Errorf("failed to get model: %w", err)
 		}
@@ -101,13 +102,6 @@ func (s *Server) dispatchLLMProxy(req api.Context) error {
 			return fmt.Errorf("model provider not configured, failed to get credential: %w", err)
 		}
 
-		// For personal tokens, look up the model to get its ID for permission checking
-		m, err := getModelProviderForModel(req.Context(), req.Storage, token.Namespace, modelStr)
-		if err != nil {
-			return fmt.Errorf("failed to get model: %w", err)
-		}
-		modelID = m.Name
-
 		credEnv = cred.Env
 		personalToken = true
 	}
@@ -115,29 +109,28 @@ func (s *Server) dispatchLLMProxy(req api.Context) error {
 	// Check if the user has permission to use this model
 	if s.mprHelper != nil && modelID != "" && token.UserID != "" {
 		userID, err := strconv.ParseUint(token.UserID, 10, 64)
-		if err == nil {
-			// Get the user's auth provider groups
-			authProviderGroups, err := req.GatewayClient.ListGroupIDsForUser(req.Context(), uint(userID))
-			if err != nil {
-				return fmt.Errorf("failed to get user groups: %w", err)
-			}
+		if err != nil {
+			return fmt.Errorf("failed to parse user ID: %w", err)
+		}
 
-			// Create a user.Info with the user's groups
-			userInfo := &user.DefaultInfo{
-				UID:    token.UserID,
-				Groups: token.UserGroups,
-				Extra: map[string][]string{
-					"auth_provider_groups": authProviderGroups,
-				},
-			}
+		// Get the user's auth provider groups
+		authProviderGroups, err := req.GatewayClient.ListGroupIDsForUser(req.Context(), uint(userID))
+		if err != nil {
+			return fmt.Errorf("failed to get user groups: %w", err)
+		}
 
-			hasAccess, err := s.mprHelper.UserHasAccessToModel(userInfo, modelID)
-			if err != nil {
-				return fmt.Errorf("failed to check model permission: %w", err)
-			}
-			if !hasAccess {
-				return types2.NewErrHTTP(http.StatusForbidden, fmt.Sprintf("user does not have permission to use model %q", modelID))
-			}
+		hasAccess, err := s.mprHelper.UserHasAccessToModel(&user.DefaultInfo{
+			UID:    token.UserID,
+			Groups: token.UserGroups,
+			Extra: map[string][]string{
+				"auth_provider_groups": authProviderGroups,
+			},
+		}, modelID)
+		if err != nil {
+			return fmt.Errorf("failed to check model permission: %w", err)
+		}
+		if !hasAccess {
+			return types2.NewErrForbidden("user does not have permission to use model %q", modelID)
 		}
 	}
 
@@ -176,14 +169,19 @@ func (s *Server) dispatchLLMProxy(req api.Context) error {
 	return nil
 }
 
-func getModelProviderForModel(ctx context.Context, client kclient.Client, namespace, model string) (*v1.Model, error) {
-	m, err := alias.GetFromScope(ctx, client, "Model", namespace, model)
+// getModelFromReference retrieves the model with a matching reference name.
+// The reference name must be any one of the following:
+// - The target name of a default model alias
+// - The target name of the model itself
+// - The actual name of the model
+func getModelFromReference(ctx context.Context, client kclient.Client, namespace, modelReference string) (*v1.Model, error) {
+	m, err := alias.GetFromScope(ctx, client, "Model", namespace, modelReference)
 	if apierrors.IsNotFound(err) {
 		// Maybe the user is trying to get a model by the target name.
 		var models v1.ModelList
 		if err := client.List(ctx, &models, &kclient.ListOptions{
 			Namespace:     namespace,
-			FieldSelector: fields.OneTermEqualSelector("spec.manifest.targetModel", model),
+			FieldSelector: fields.OneTermEqualSelector("spec.manifest.targetModel", modelReference),
 		}); err != nil {
 			return nil, err
 		}
@@ -207,7 +205,7 @@ func getModelProviderForModel(ctx context.Context, client kclient.Client, namesp
 	switch m := m.(type) {
 	case *v1.DefaultModelAlias:
 		if m.Spec.Manifest.Model == "" {
-			return nil, fmt.Errorf("default model alias %q is not configured", model)
+			return nil, fmt.Errorf("default model alias %q is not configured", modelReference)
 		}
 		var model v1.Model
 		if err := alias.Get(ctx, client, &model, namespace, m.Spec.Manifest.Model); err != nil {
@@ -226,7 +224,7 @@ func getModelProviderForModel(ctx context.Context, client kclient.Client, namesp
 		return respModel, nil
 	}
 
-	return nil, fmt.Errorf("model %q not found", model)
+	return nil, fmt.Errorf("model %q not found", modelReference)
 }
 
 func envVarForModelProvider(modelProvider v1.ToolReference) (string, error) {
@@ -365,6 +363,7 @@ type llmProviderProxy struct {
 	u                                  url.URL
 	modelProviderName                  string
 	modelProvider                      *v1.ToolReference
+	mprHelper                          *modelpermissionrule.Helper
 	lock                               sync.RWMutex
 }
 
@@ -391,6 +390,58 @@ func (l *llmProviderProxy) proxy(req api.Context) error {
 		l.lock.Lock()
 		l.modelProvider = modelProvider
 		l.lock.Unlock()
+	}
+
+	// Reject chat completion and responses API requests that target models the user doesn't have access to
+	if path := req.URL.Path; req.Method == http.MethodPost &&
+		(strings.HasSuffix(path, "/chat/completions") || strings.HasSuffix(path, "/responses")) {
+		// Extract the target model from the request body
+		body, err := readBody(req.Request)
+		if err != nil {
+			return fmt.Errorf("failed to read model from request body: %w", err)
+		}
+
+		model, ok := body["model"]
+		if !ok {
+			return types2.NewErrBadRequest("missing required parameter: 'model'")
+		}
+
+		targetModel, ok := model.(string)
+		if !ok {
+			return types2.NewErrNotFound("the requested model %q does not exist", targetModel)
+		}
+
+		// Get the model ID for the target model and provider.
+		// Target models should be unique with the context of a given provider, so only take the first result.
+		var models v1.ModelList
+		if err := req.List(&models, &kclient.ListOptions{
+			Namespace: l.modelProvider.Namespace,
+			FieldSelector: fields.SelectorFromSet(map[string]string{
+				"spec.manifest.targetModel":   targetModel,
+				"spec.manifest.modelProvider": l.modelProvider.Name,
+			}),
+			Limit: 1,
+		}); err != nil {
+			return fmt.Errorf("failed to list models: %w", err)
+		}
+
+		var modelID string
+		if len(models.Items) > 0 {
+			modelID = models.Items[0].Name
+		}
+
+		if modelID == "" {
+			return types2.NewErrNotFound("the requested model %q does not exist", targetModel)
+		}
+
+		// Check if the user has been granted access to the model
+		hasAccess, err := l.mprHelper.UserHasAccessToModel(req.User, modelID)
+		if err != nil {
+			return fmt.Errorf("failed to check user access to model %q: %w", targetModel, err)
+		}
+		if !hasAccess {
+			return types2.NewErrForbidden("user does not have permission to use model %q", targetModel)
+		}
 	}
 
 	remainingUsage, err := req.GatewayClient.RemainingTokenUsageForUser(req.Context(), req.User.GetUID(), tokenUsageTimePeriod, l.dailyUserTokenPromptTokenLimit, l.dailyUserTokenCompletionTokenLimit)

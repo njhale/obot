@@ -582,61 +582,10 @@ func New(ctx context.Context, config Config) (*Services, error) {
 
 	acrHelper := accesscontrolrule.NewAccessControlRuleHelper(acrInformer.GetIndexer(), r.Backend())
 
-	// Set up ModelPermissionRule indexer
-	mprGVK, err := r.Backend().GroupVersionKindFor(&v1.ModelPermissionRule{})
+	mprHelper, err := modelpermissionrule.NewHelper(ctx, r.Backend())
 	if err != nil {
 		return nil, err
 	}
-
-	mprInformer, err := r.Backend().GetInformerForKind(ctx, mprGVK)
-	if err != nil {
-		return nil, err
-	}
-
-	if err = mprInformer.AddIndexers(map[string]gocache.IndexFunc{
-		"user-ids": func(obj any) ([]string, error) {
-			mpr := obj.(*v1.ModelPermissionRule)
-			var results []string
-			for _, subject := range mpr.Spec.Manifest.Subjects {
-				if subject.Type == apiclienttypes.SubjectTypeUser {
-					results = append(results, subject.ID)
-				}
-			}
-			return results, nil
-		},
-		"group-ids": func(obj any) ([]string, error) {
-			mpr := obj.(*v1.ModelPermissionRule)
-			var results []string
-			for _, subject := range mpr.Spec.Manifest.Subjects {
-				if subject.Type == apiclienttypes.SubjectTypeGroup {
-					results = append(results, subject.ID)
-				}
-			}
-			return results, nil
-		},
-		"subject-selectors": func(obj any) ([]string, error) {
-			mpr := obj.(*v1.ModelPermissionRule)
-			var results []string
-			for _, subject := range mpr.Spec.Manifest.Subjects {
-				if subject.Type == apiclienttypes.SubjectTypeSelector {
-					results = append(results, subject.ID)
-				}
-			}
-			return results, nil
-		},
-		"model-ids": func(obj any) ([]string, error) {
-			mpr := obj.(*v1.ModelPermissionRule)
-			var results []string
-			for _, model := range mpr.Spec.Manifest.Models {
-				results = append(results, model.ModelID)
-			}
-			return results, nil
-		},
-	}); err != nil {
-		return nil, err
-	}
-
-	mprHelper := modelpermissionrule.NewHelper(mprInformer.GetIndexer())
 
 	// Set up MCPWebhookValidation indexer
 	mcpWebhookValidationGVK, err := r.Backend().GroupVersionKindFor(&v1.MCPWebhookValidation{})

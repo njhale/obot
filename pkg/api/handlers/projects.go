@@ -923,9 +923,6 @@ func (h *ProjectsHandler) GetDefaultModelForProject(req api.Context) error {
 		model = alias.Spec.Manifest.Model
 	}
 
-	// Track the model ID before resolving to check permissions
-	modelID := model
-
 	if strings.HasPrefix(model, system.ModelPrefix) {
 		var modelObj v1.Model
 		if err := req.Get(&modelObj, model); err != nil {
@@ -937,8 +934,8 @@ func (h *ProjectsHandler) GetDefaultModelForProject(req api.Context) error {
 	}
 
 	// Check if the user has permission to use this model
-	if h.mprHelper != nil && modelID != "" {
-		hasAccess, err := h.mprHelper.UserHasAccessToModel(req.User, modelID)
+	if h.mprHelper != nil && model != "" {
+		hasAccess, err := h.mprHelper.UserHasAccessToModel(req.User, model)
 		if err != nil {
 			return fmt.Errorf("failed to check model permission: %w", err)
 		}

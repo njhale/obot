@@ -160,18 +160,18 @@
 
 	function convertModelsToTableData(models: ModelResource[]) {
 		return models.map((model) => {
-			if (model.modelID === '*') {
+			if (model.id === '*') {
 				return {
-					id: model.modelID,
+					id: model.id,
 					name: 'All Models',
 					provider: '-'
 				};
 			}
 
-			const m = modelsMap.get(model.modelID);
+			const m = modelsMap.get(model.id);
 			return {
-				id: model.modelID,
-				name: m?.displayName || m?.name || model.modelID,
+				id: model.id,
+				name: m?.displayName || m?.name || model.id,
 				provider: m?.modelProviderName || '-'
 			};
 		});
@@ -319,7 +319,7 @@
 							class="icon-button hover:text-red-500"
 							onclick={() => {
 								modelPermissionRule.models =
-									modelPermissionRule.models?.filter((m) => m.modelID !== d.id) ?? [];
+									modelPermissionRule.models?.filter((m) => m.id !== d.id) ?? [];
 							}}
 							use:tooltip={'Remove Model'}
 						>
@@ -418,12 +418,10 @@
 
 <SearchModels
 	bind:this={addModelDialog}
-	exclude={modelPermissionRule.models?.map((m) => m.modelID) ?? []}
+	exclude={modelPermissionRule.models?.map((m) => m.id) ?? []}
 	onAdd={async (modelIds: string[]) => {
-		const existingModelIds = new Set(modelPermissionRule.models?.map((m) => m.modelID) ?? []);
-		const newModels = modelIds
-			.filter((id) => !existingModelIds.has(id))
-			.map((id) => ({ modelID: id }));
+		const existingModelIds = new Set(modelPermissionRule.models?.map((m) => m.id) ?? []);
+		const newModels = modelIds.filter((id) => !existingModelIds.has(id)).map((id) => ({ id: id }));
 
 		modelPermissionRule.models = [...(modelPermissionRule.models ?? []), ...newModels];
 	}}

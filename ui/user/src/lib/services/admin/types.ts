@@ -330,7 +330,7 @@ export interface AccessControlRule extends Omit<AccessControlRuleManifest, 'id'>
 }
 
 export interface ModelResource {
-	modelID: string;
+	id: string;
 }
 
 export interface ModelPermissionRuleManifest {

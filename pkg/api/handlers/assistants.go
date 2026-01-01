@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"maps"
 	"net/http"
 	"slices"
@@ -21,7 +22,6 @@ import (
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/client-go/util/retry"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -129,20 +129,11 @@ func (a *AssistantHandler) Get(req api.Context) error {
 	}
 
 	assistant := convertAssistant(*agent)
-
-	// Get all available models
-	var modelList v1.ModelList
-	if err := req.List(&modelList); err != nil {
-		return err
+	assistant.AllowedModels, err = a.getAllowedModelsForRequest(req)
+	if err != nil {
+		return fmt.Errorf("failed to get allowed models for request: %w", err)
 	}
 
-	allModelIDs := make([]string, 0, len(modelList.Items))
-	for _, model := range modelList.Items {
-		allModelIDs = append(allModelIDs, model.Name)
-	}
-
-	// Filter by user permissions
-	assistant.AllowedModels = a.filterAllowedModelsByPermission(req.User, allModelIDs)
 	return req.Write(assistant)
 }
 
@@ -152,23 +143,25 @@ func (a *AssistantHandler) List(req api.Context) error {
 		return err
 	}
 
-	// Get all available models once
-	var modelList v1.ModelList
-	if err := req.List(&modelList); err != nil {
-		return err
-	}
-
-	allModelIDs := make([]string, 0, len(modelList.Items))
-	for _, model := range modelList.Items {
-		allModelIDs = append(allModelIDs, model.Name)
-	}
-
-	var result types.AssistantList
+	var (
+		result           types.AssistantList
+		allowedModels    []string
+		gotAllowedModels bool
+	)
 	for _, agent := range allAgents.Items {
 		if agent.Spec.Manifest.Default || req.UserIsAdmin() {
+			if !gotAllowedModels {
+				var err error
+				allowedModels, err = a.getAllowedModelsForRequest(req)
+				if err != nil {
+					return fmt.Errorf("failed to get allowed models for request: %w", err)
+				}
+
+				gotAllowedModels = true
+			}
+
 			assistant := convertAssistant(agent)
-			// Filter all models by user permissions
-			assistant.AllowedModels = a.filterAllowedModelsByPermission(req.User, allModelIDs)
+			assistant.AllowedModels = allowedModels
 			result.Items = append(result.Items, assistant)
 		}
 	}
@@ -176,47 +169,29 @@ func (a *AssistantHandler) List(req api.Context) error {
 	return req.Write(result)
 }
 
-// filterAllowedModelsByPermission filters the list of allowed models based on the user's model permissions.
-// If no Model Permission Rules exist, all models are allowed (no filtering).
-// If the user has wildcard access to all models, no filtering is applied.
-// Otherwise, only models the user has explicit permission for are returned.
-func (a *AssistantHandler) filterAllowedModelsByPermission(userInfo user.Info, allowedModels []string) []string {
-	if a.mprHelper == nil || len(allowedModels) == 0 {
-		return allowedModels
-	}
-
-	// Get the user's allowed models
-	userAllowedModels, hasWildcard, err := a.mprHelper.GetAllowedModelsForUser(userInfo)
+// getAllowedModelsForRequest returns the list of model IDs that the user making the request can use.
+func (a *AssistantHandler) getAllowedModelsForRequest(req api.Context) ([]string, error) {
+	allowedModels, allowAll, err := a.mprHelper.GetAllowedModelsForUser(req.User)
 	if err != nil {
-		log.Warnf("failed to get allowed models for user: %v", err)
-		return allowedModels
+		return nil, err
 	}
 
-	// If user has wildcard access, return all models
-	if hasWildcard {
-		return allowedModels
+	if !allowAll {
+		return allowedModels, nil
 	}
 
-	// If no rules apply to the user, they have no permissions - return empty list
-	if len(userAllowedModels) == 0 {
-		return []string{}
+	// User has access to all models, build a list containing all model IDs
+	var models v1.ModelList
+	if err := a.cachedClient.List(req.Context(), &models); err != nil {
+		return nil, err
 	}
 
-	// Create a set for O(1) lookup
-	allowedSet := make(map[string]struct{}, len(userAllowedModels))
-	for _, modelID := range userAllowedModels {
-		allowedSet[modelID] = struct{}{}
+	allowedModels = make([]string, 0, len(models.Items))
+	for _, model := range models.Items {
+		allowedModels = append(allowedModels, model.Name)
 	}
 
-	// Filter the assistant's allowed models to only include those the user has permission for
-	filtered := make([]string, 0, len(allowedModels))
-	for _, modelID := range allowedModels {
-		if _, ok := allowedSet[modelID]; ok {
-			filtered = append(filtered, modelID)
-		}
-	}
-
-	return filtered
+	return allowedModels, nil
 }
 
 func convertAssistant(agent v1.Agent) types.Assistant {

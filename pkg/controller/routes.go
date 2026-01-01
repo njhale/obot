@@ -20,6 +20,7 @@ import (
 	"github.com/obot-platform/obot/pkg/controller/handlers/mcpservercatalogentry"
 	"github.com/obot-platform/obot/pkg/controller/handlers/mcpserverinstance"
 	"github.com/obot-platform/obot/pkg/controller/handlers/mcpsession"
+	"github.com/obot-platform/obot/pkg/controller/handlers/modelpermissionrule"
 	"github.com/obot-platform/obot/pkg/controller/handlers/oauthapp"
 	"github.com/obot-platform/obot/pkg/controller/handlers/oauthclients"
 	"github.com/obot-platform/obot/pkg/controller/handlers/poweruserworkspace"
@@ -131,9 +132,10 @@ func (c *Controller) setupRoutes() {
 	root.Type(&v1.WorkflowExecution{}).HandlerFunc(workflowExecution.ReassignThread)
 
 	// Agents
+	root.Type(&v1.Agent{}).HandlerFunc(modelpermissionrule.MigrateAgentAllowedModels)
+	root.Type(&v1.Agent{}).HandlerFunc(modelpermissionrule.MigrateAgentDefaultModel)
 	root.Type(&v1.Agent{}).HandlerFunc(agents.CreateWorkspaceAndKnowledgeSet)
 	root.Type(&v1.Agent{}).HandlerFunc(agents.BackPopulateAuthStatus)
-	root.Type(&v1.Agent{}).HandlerFunc(agents.MigrateAllowedModels)
 	root.Type(&v1.Agent{}).HandlerFunc(alias.AssignAlias)
 	root.Type(&v1.Agent{}).HandlerFunc(toolInfo.SetToolInfoStatus)
 	root.Type(&v1.Agent{}).HandlerFunc(toolInfo.RemoveUnneededCredentials)
@@ -256,6 +258,9 @@ func (c *Controller) setupRoutes() {
 	root.Type(&v1.AccessControlRule{}).FinalizeFunc(v1.AccessControlRuleFinalizer, func(router.Request, router.Response) error {
 		return nil
 	})
+
+	// ModelPermissionRules
+	root.Type(&v1.ModelPermissionRule{}).HandlerFunc(modelpermissionrule.PruneModels)
 
 	// ProjectInvitations
 	root.Type(&v1.ProjectInvitation{}).HandlerFunc(projectinvitation.SetRespondedTime)
