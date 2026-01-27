@@ -357,17 +357,23 @@ func (d *dockerBackend) getServerDetails(ctx context.Context, id string) (otypes
 	since := time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
 	eventFilters := filters.NewArgs()
 	eventFilters.Add("container", container.ID)
-
 	eventOptions := events.ListOptions{
 		Since:   since,
 		Filters: eventFilters,
 	}
 
-	eventMessages, errs := d.client.Events(ctx, eventOptions)
+	// Use a child context to ensure the event stream is closed before returning from this method.
+	// This prevents orphaned streams when called with long-lived contexts (e.g. when log streaming requests are initialized).
+	eventCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Start the event stream
+	eventMessages, errs := d.client.Events(eventCtx, eventOptions)
 	var mcpEvents []otypes.MCPServerEvent
 
-	// Collect events (but don't block if there are none)
+	// Collect events for up to 100 ms (don't block if there are none)
 	timeout := time.After(100 * time.Millisecond)
+
 eventLoop:
 	for {
 		select {
