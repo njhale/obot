@@ -38,15 +38,14 @@ import (
 )
 
 var (
-	errToolConfirmTimeout = errors.New("timeout waiting for user to confirm tool call")
 	log                   = logger.Package()
 	ephemeralCounter      atomic.Int32
+	abortedConfirmMessage = "ABORTED BY USER"
 )
 
 const (
 	ephemeralRunPrefix = "ephemeral-run"
 	runOutputMaxLength = 2000
-	toolConfirmTimeout = 5 * time.Minute
 )
 
 type Invoker struct {
@@ -1078,13 +1077,19 @@ func (i *Invoker) stream(ctx context.Context, gptClient *gptscript.GPTScript, c 
 		timeout = run.Spec.Timeout.Duration
 	}
 	go timeoutAfter(runCtx, cancelRun, timeout)
+
+	// Context for signaling abort to pending tool confirmations
+	confirmCtx, cancelConfirm := context.WithCancel(ctx)
+	defer cancelConfirm()
+
 	if !isEphemeral(run) {
 		// Don't watch thread abort for ephemeral runs
-		go i.watchThreadAbort(runCtx, gptClient, c, thread, cancelRun, runResp)
+		go i.watchThreadAbort(runCtx, gptClient, c, thread, runResp, cancelRun, cancelConfirm)
 	}
 
 	var (
 		abortTimeout = func() {}
+		abortDeny    = func() {}
 		prg          *gptscript.Program
 	)
 
@@ -1170,18 +1175,42 @@ func (i *Invoker) stream(ctx context.Context, gptClient *gptscript.GPTScript, c 
 					var (
 						callID   = frame.Call.ID
 						toolName = frame.Call.Tool.Name
+						latest   v1.Thread
 					)
+
+					if c.Get(ctx, router.Key(thread.Namespace, thread.Name), &latest) != nil {
+						log.Warnf("Using stale approved tools for thread %s", thread.Name)
+						latest = *thread.DeepCopy()
+					}
 
 					// Auto-confirm pre-approved tools.
 					if frame.Call.ToolCategory != gptscript.NoCategory ||
-						slices.Contains(thread.Spec.ApprovedTools, toolName) {
+						slices.Contains(latest.Spec.ApprovedTools, toolName) {
 						if err := gptClient.Confirm(runCtx, gptscript.AuthResponse{
 							ID:     callID,
-							Accept: true,
+							Accept: !thread.Spec.Abort,
 						}); err != nil {
 							return err
 						}
 						break
+					}
+
+					// GPTScript blocks on pending tool calls, which can cause abort operations to time out.
+					// To avoid this, ensure unfinished calls are denied when we recieve an abort request.
+					stopDeny := context.AfterFunc(confirmCtx, func() {
+						ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+						defer cancel()
+
+						if err := gptClient.Confirm(ctx, gptscript.AuthResponse{
+							ID:      callID,
+							Accept:  false,
+							Message: abortedConfirmMessage,
+						}); err != nil {
+							log.Warnf("failed to deny pending tool call on abort: %s/%s", toolName, callID)
+						}
+					})
+					abortDeny = func() {
+						stopDeny()
 					}
 
 					// Emit tool confirm to frontend
@@ -1196,21 +1225,9 @@ func (i *Invoker) stream(ctx context.Context, gptClient *gptscript.GPTScript, c 
 						Time:        types.NewTime(time.Now()),
 						ToolConfirm: toolConfirm,
 					})
-
-					// Set up timeout for approval response (similar to prompt timeout)
-					timeoutCtx, timeoutCancel := context.WithCancel(ctx)
-					abortTimeout = timeoutCancel
-					go func() {
-						defer timeoutCancel()
-						select {
-						case <-timeoutCtx.Done():
-						case <-time.After(toolConfirmTimeout):
-							cancelRun(errToolConfirmTimeout)
-						}
-					}()
-
 				case gptscript.EventTypeCallFinish:
 					abortTimeout()
+					abortDeny()
 					fallthrough
 				case gptscript.EventTypeCallProgress, gptscript.EventTypeCallStart:
 					i.events.Submit(run, prg, runResp.Calls())
@@ -1220,19 +1237,23 @@ func (i *Invoker) stream(ctx context.Context, gptClient *gptscript.GPTScript, c 
 	}
 }
 
-func (i *Invoker) watchThreadAbort(ctx context.Context, gptClient *gptscript.GPTScript, c kclient.WithWatch, thread *v1.Thread, cancel context.CancelCauseFunc, run *gptscript.Run) {
+func (i *Invoker) watchThreadAbort(ctx context.Context, gptClient *gptscript.GPTScript, c kclient.WithWatch, thread *v1.Thread, run *gptscript.Run, cancelRun context.CancelCauseFunc, cancelConfirm context.CancelFunc) {
 	_, _ = wait.For(ctx, c, thread, func(thread *v1.Thread) (bool, error) {
 		if thread.Spec.Abort {
-			// we should abort aggressive in the task so that the next step in task won't continue
+			// We should abort aggressive in the task so that the next step in task won't continue
 			if thread.Spec.WorkflowExecutionName != "" {
-				cancel(fmt.Errorf("thread was aborted, cancelling run"))
+				cancelRun(fmt.Errorf("thread was aborted, cancelling run"))
 				return true, nil
 			}
 			if err := gptClient.AbortRun(ctx, run); err != nil {
 				return false, err
 			}
-			// cancel the context after 30 seconds in case the abort doesn't work
-			go timeoutAfter(ctx, cancel, 30*time.Second)
+
+			// Deny all pending tool confirmations so that abort can proceed.
+			cancelConfirm()
+
+			// Cancel the context after 30 seconds in case the abort doesn't work
+			go timeoutAfter(ctx, cancelRun, 30*time.Second)
 			return true, nil
 		}
 		return false, nil
