@@ -30,12 +30,27 @@
 
 	let displayName = $derived(current?.message.sourceName || current?.confirm.toolName || '');
 
+	let serverPrefix = $derived.by(() => {
+		const name = current?.confirm.toolName ?? '';
+		const idx = name.indexOf(' -> ');
+		return idx !== -1 ? name.substring(0, idx + ' -> '.length) : '';
+	});
+
+	let serverName = $derived.by(() => {
+		const name = current?.confirm.toolName ?? '';
+		const idx = name.indexOf(' -> ');
+		return idx !== -1 ? name.substring(0, idx) : '';
+	});
+
+	let lastSeenId = $state('');
 	let isSubmitted = $state(false);
 	let isExpanded = $state(false);
 
-	// Reset state when the current confirm changes
-	$effect(() => {
-		if (current) {
+	// Reset state before DOM update when the confirm changes
+	$effect.pre(() => {
+		const id = current?.confirm.id ?? '';
+		if (id !== lastSeenId) {
+			lastSeenId = id;
 			isSubmitted = false;
 			isExpanded = false;
 		}
@@ -136,8 +151,19 @@
 									dropdown.toggle(false);
 								}}
 							>
-								Allow all {current.confirm.toolName} requests
+								Allow all {displayName} requests
 							</button>
+							{#if serverPrefix}
+								<button
+									class="text-on-background hover:bg-surface3 px-3 py-1.5 text-left text-xs transition-colors"
+									onclick={() => {
+										handleConfirm(current.confirm, 'approve_thread', serverPrefix + '*');
+										dropdown.toggle(false);
+									}}
+								>
+									Allow all {serverName} requests
+								</button>
+							{/if}
 							<button
 								class="text-on-background hover:bg-surface3 px-3 py-1.5 text-left text-xs transition-colors"
 								onclick={() => {
