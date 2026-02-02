@@ -149,6 +149,9 @@ type ToolConfirm struct {
 type ToolConfirmDecision string
 
 const (
+	// ToolConfirmDecisionUnknown indicates that a decision hasn't been made for the tool call yet.
+	ToolConfirmDecisionUnknown = ""
+
 	// ToolConfirmDecisionDeny indicates that the tool call has been denied.
 	ToolConfirmDecisionDeny = "deny"
 
