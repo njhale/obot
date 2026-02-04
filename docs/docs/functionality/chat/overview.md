@@ -1,3 +1,7 @@
+---
+title: Overview
+---
+
 # Obot Chat
 
 Obot Chat is a web-based interface for interacting with AI through customizable projects. Users create projects configured with instructions, knowledge, and MCP server connections, then chat with them through threads.

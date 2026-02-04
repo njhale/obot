@@ -41,6 +41,7 @@ The Obot server is configured via environment variables. The following configura
 | `OBOT_SERVER_SERVICE_NAME` | The Kubernetes service name for the obot server. Automatically set by the helm chart when using kubernetes backend. Used to construct the internal service FQDN for token exchange endpoints. | - |
 | `OBOT_SERVER_SERVICE_NAMESPACE` | The Kubernetes namespace where the obot server runs. Automatically set by the helm chart when using kubernetes backend. Used to construct the internal service FQDN for token exchange endpoints. | - |
 | `OBOT_SERVER_DISALLOW_LOCALHOST_MCP` | Disallow MCP servers that try to connect to localhost. | `false` |
+| `OBOT_SERVER_ENABLE_AUTONOMOUS_TOOL_USE` | When set to `true`, chat sessions run tools automatically without requiring user approval. See [Tool Confirmation](/functionality/chat/tool-call-approval/) for details. | `false` |
 | `OBOT_SERVER_MCPPOD_SECURITY_ENABLED` | Enable Pod Security Admission labels on the MCP namespace. Only applies when using kubernetes backend. | `true` |
 | `OBOT_SERVER_MCPPOD_SECURITY_ENFORCE` | Pod Security Standards level to enforce for MCP namespace (privileged, baseline, or restricted). Only applies when using kubernetes backend. | `restricted` |
 | `OBOT_SERVER_MCPPOD_SECURITY_ENFORCE_VERSION` | Kubernetes version for the PSA enforce policy. Only applies when using kubernetes backend. | `latest` |

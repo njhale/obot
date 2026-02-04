@@ -30,7 +30,14 @@ const sidebars = {
         "functionality/user-management",
         "functionality/api-keys",
         "functionality/branding",
-        "functionality/chat/overview",
+        {
+          type: "category",
+          label: "Chat",
+          items: [
+            "functionality/chat/overview",
+            "functionality/chat/tool-call-approval",
+          ],
+        },
       ],
     },
     {

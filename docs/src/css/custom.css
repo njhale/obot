@@ -272,3 +272,8 @@ a {
 pre, code, .prism-code {
   transition: none;
 }
+
+/* Hide version badge on doc pages */
+.theme-doc-version-badge {
+  display: none;
+}
