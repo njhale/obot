@@ -32,13 +32,22 @@
 
 	type FileTreeNode =
 		| { type: 'folder'; name: string; children: FileTreeNode[] }
-		| { type: 'file'; name: string; uri: string };
+		| {
+				type: 'file';
+				name: string;
+				uri: string;
+				size?: number;
+				createdAt?: string;
+				modifiedAt?: string;
+		  };
 
 	function onFileOpen(filename: string) {
 		projectLayout?.handleFileOpen(filename);
 	}
 
-	function buildFileTreeSimple(files: { uri: string; name?: string }[]): FileTreeNode[] {
+	function buildFileTreeSimple(
+		files: { uri: string; name?: string; size?: number; _meta?: { [key: string]: unknown } }[]
+	): FileTreeNode[] {
 		const root: Extract<FileTreeNode, { type: 'folder' }> = {
 			type: 'folder',
 			name: '',
@@ -65,7 +74,14 @@
 			if (segments.length === 0) continue;
 			const fileName = segments.pop()!;
 			const parent = ensurePath(segments);
-			parent.children.push({ type: 'file', name: fileName, uri: f.uri });
+			parent.children.push({
+				type: 'file',
+				name: fileName,
+				uri: f.uri,
+				size: f.size,
+				createdAt: (f._meta?.createdAt as string) || undefined,
+				modifiedAt: (f._meta?.modifiedAt as string) || undefined
+			});
 		}
 		// Sort: folders first then files, both alphabetically
 		function sortNodes(nodes: FileTreeNode[]): void {
@@ -81,6 +97,22 @@
 		sortNodes(root.children);
 		return root.children;
 	}
+
+	function formatFileSize(bytes?: number): string {
+		if (!bytes) return '';
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	}
+
+	function formatDateTime(iso?: string): string {
+		if (!iso) return '';
+		return new Date(iso).toLocaleString();
+	}
+
+	let hasModifiedAt = $derived(resourceFiles.some((r) => !!(r._meta?.modifiedAt as string)));
+	let hasCreatedAt = $derived(resourceFiles.some((r) => !!(r._meta?.createdAt as string)));
+	let columnCount = $derived(3 + (hasModifiedAt ? 1 : 0) + (hasCreatedAt ? 1 : 0));
 
 	let fileTree = $derived(buildFileTreeSimple(resourceFiles));
 
@@ -213,8 +245,8 @@
 				<tr>
 					<th>Name</th>
 					<th>Size</th>
-					<th>Last Modified</th>
-					<th>Created</th>
+					{#if hasModifiedAt}<th>Last Modified</th>{/if}
+					{#if hasCreatedAt}<th>Created</th>{/if}
 					<th>Location</th>
 				</tr>
 			</thead>
@@ -237,16 +269,19 @@
 								<td class="flex items-center gap-2">
 									<FileItem uri={node.uri} />
 								</td>
-								<td></td>
-								<td></td>
-								<td></td>
+								<td>{formatFileSize(node.size)}</td>
+								{#if hasModifiedAt}<td>{formatDateTime(node.modifiedAt)}</td>{/if}
+								{#if hasCreatedAt}<td>{formatDateTime(node.createdAt)}</td>{/if}
 								<td class="text-base-content/50 text-sm font-light italic">{node.uri}</td>
 							</tr>
 						{/if}
 					{/each}
 				{:else}
 					<tr>
-						<td colspan="5" class="text-base-content/50 text-center text-sm font-light italic">
+						<td
+							colspan={columnCount}
+							class="text-base-content/50 text-center text-sm font-light italic"
+						>
 							<span>No files found.</span>
 						</td>
 					</tr>
