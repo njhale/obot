@@ -31,6 +31,26 @@
 		return mimeType === 'application/pdf';
 	}
 
+	function base64ToBlobUrl(base64: string, mime: string): string {
+		const binary = atob(base64);
+		const bytes = new Uint8Array(binary.length);
+		for (let i = 0; i < binary.length; i++) {
+			bytes[i] = binary.charCodeAt(i);
+		}
+		return URL.createObjectURL(new Blob([bytes], { type: mime }));
+	}
+
+	let pdfBlobUrl = $state<string>();
+	$effect(() => {
+		if (!isPdfType(item.resource.mimeType) || !item.resource.blob) {
+			pdfBlobUrl = undefined;
+			return;
+		}
+		const url = base64ToBlobUrl(item.resource.blob, 'application/pdf');
+		pdfBlobUrl = url;
+		return () => URL.revokeObjectURL(url);
+	});
+
 	function isCancelledError(text?: string): boolean {
 		return isCancellationError(text);
 	}
@@ -183,10 +203,10 @@
 					<div class="mockup-code">
 						<pre><code>{getDecodedText()}</code></pre>
 					</div>
-				{:else if isPdfType(item.resource.mimeType) && item.resource.blob}
+				{:else if isPdfType(item.resource.mimeType) && pdfBlobUrl}
 					<div class="w-full">
 						<iframe
-							src="data:application/pdf;base64,{item.resource.blob}"
+							src={pdfBlobUrl}
 							class="border-base-300 h-96 w-full rounded border"
 							title="PDF Viewer"
 						></iframe>

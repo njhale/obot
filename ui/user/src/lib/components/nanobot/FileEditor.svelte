@@ -232,6 +232,25 @@
 	let isMarkdown = $derived(mimeType.startsWith('text/markdown') || extension === 'md');
 	let isPdf = $derived(mimeType === 'application/pdf');
 
+	// Convert base64 PDF blobs to blob URLs to avoid Chrome's ~2MB data URI limit
+	let pdfBlobUrl = $state<string>();
+	$effect(() => {
+		if (!isPdf || !resource?.blob) {
+			pdfBlobUrl = undefined;
+			return;
+		}
+
+		const binary = atob(resource.blob);
+		const bytes = new Uint8Array(binary.length);
+		for (let i = 0; i < binary.length; i++) {
+			bytes[i] = binary.charCodeAt(i);
+		}
+		const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+		pdfBlobUrl = url;
+
+		return () => URL.revokeObjectURL(url);
+	});
+
 	const visible = $derived(mounted && open);
 	let justOpened = $state(false);
 
@@ -333,13 +352,12 @@
 							class="h-auto max-w-full"
 						/>
 					</div>
-				{:else if isPdf}
+				{:else if isPdf && pdfBlobUrl}
 					<div class="h-full w-full">
 						<iframe
-							src="data:application/pdf;base64,{resource.blob}"
+							src={pdfBlobUrl}
 							class="border-base-300 h-full w-full rounded border"
 							title="PDF Viewer"
-							sandbox=""
 						></iframe>
 					</div>
 				{:else}
