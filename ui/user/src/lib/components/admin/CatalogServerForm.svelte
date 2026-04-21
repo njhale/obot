@@ -67,6 +67,7 @@
 	let selectRulesDialog = $state<ReturnType<typeof SelectMcpAccessControlRules>>();
 	let showRequired = $state<Record<string, boolean>>({});
 	let loading = $state(false);
+	let compositeHasToolNameErrors = $state(false);
 
 	let formData = $state<RuntimeFormData>(untrack(() => convertToFormData(entry)));
 
@@ -705,6 +706,7 @@
 {:else if formData.runtime === 'composite' && formData.compositeConfig}
 	<CompositeRuntimeForm
 		bind:config={formData.compositeConfig}
+		bind:hasToolNameErrors={compositeHasToolNameErrors}
 		{readonly}
 		catalogId={id}
 		id={entry?.id}
@@ -914,7 +916,8 @@
 			disabled={loading ||
 				(formData.runtime === 'composite' &&
 					(!formData.compositeConfig?.componentServers ||
-						formData.compositeConfig.componentServers.length === 0))}
+						formData.compositeConfig.componentServers.length === 0 ||
+						compositeHasToolNameErrors))}
 		>
 			{#if loading}
 				<LoaderCircle class="size-4 animate-spin" />

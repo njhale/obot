@@ -500,3 +500,115 @@ export const getMcpServerDeploymentStatus = (
 
 	return { updateStatus, updatesAvailable, updateStatusTooltip };
 };
+
+// deriveToolPrefix turns a human-readable component name into a sensible
+// default MCP tool-name prefix — lower_snake_case with a trailing underscore.
+// Returns "" when name is empty or contains no alphanumerics.
+export function deriveToolPrefix(name: string): string {
+	if (!name) return '';
+	const base = name
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '_')
+		.replace(/^_+|_+$/g, '');
+	return base ? `${base}_` : '';
+}
+
+// isValidToolPrefix mirrors the server-side charset check for composite
+// component ToolPrefix values (see pkg/validation/mcpvalidators.go).
+// '.' and '/' are permitted here but trigger a soft warning on the resulting
+// effective tool names because some MCP clients don't support them.
+export function isValidToolPrefix(prefix: string): boolean {
+	return /^[A-Za-z0-9._/-]*$/.test(prefix);
+}
+
+export type ToolNameIssueSeverity = 'warning' | 'error';
+export type ToolNameIssue = { severity: ToolNameIssueSeverity; message: string };
+
+const TOOL_NAME_FIX_HINT =
+	'This can be resolved by adjusting the override name and/or tool prefix.';
+
+// effectiveToolName reconstructs the final name an MCP client will see for a
+// composite-component tool: prefix + (override name if set, otherwise original).
+export function effectiveToolName(
+	originalName: string,
+	overrideName: string | undefined,
+	toolPrefix: string | undefined
+): string {
+	const base = (overrideName ?? '').trim() || originalName;
+	return (toolPrefix ?? '') + base;
+}
+
+// toolNameIssues returns the list of interop issues (warnings + errors) with
+// an effective tool name. Callers pass the FINAL name (prefix + override || original).
+export function toolNameIssues(effectiveName: string): ToolNameIssue[] {
+	const issues: ToolNameIssue[] = [];
+	if (effectiveName.length > 128) {
+		issues.push({
+			severity: 'error',
+			message: `Tool name exceeds the maximum length of 128 characters. ${TOOL_NAME_FIX_HINT}`
+		});
+	} else if (effectiveName.length > 64) {
+		issues.push({
+			severity: 'warning',
+			message: `Tool names exceeding 64 characters aren't supported by some MCP clients and inference APIs. ${TOOL_NAME_FIX_HINT}`
+		});
+	}
+	if (/[./]/.test(effectiveName)) {
+		issues.push({
+			severity: 'warning',
+			message: `'.' and '/' in MCP server tool names are not supported by some clients. ${TOOL_NAME_FIX_HINT}`
+		});
+	}
+	return issues;
+}
+
+export function toolNameSeverity(issues: ToolNameIssue[]): ToolNameIssueSeverity | undefined {
+	if (issues.some((i) => i.severity === 'error')) return 'error';
+	if (issues.some((i) => i.severity === 'warning')) return 'warning';
+	return undefined;
+}
+
+type ToolOverrideLike = { name: string; overrideName?: string; enabled?: boolean };
+type ComponentLike = { toolPrefix?: string; toolOverrides?: ToolOverrideLike[] };
+
+// compositeEffectiveToolNames returns every enabled tool's effective name
+// across the composite. Disabled tools are excluded because nanobot does not
+// expose them at runtime.
+export function compositeEffectiveToolNames(components: ComponentLike[] | undefined): string[] {
+	const out: string[] = [];
+	for (const comp of components ?? []) {
+		for (const t of comp.toolOverrides ?? []) {
+			if (t.enabled === false) continue;
+			out.push(effectiveToolName(t.name, t.overrideName, comp.toolPrefix));
+		}
+	}
+	return out;
+}
+
+// duplicateToolNames returns the set of names that appear more than once in
+// the input. Used to highlight final-name collisions across components.
+export function duplicateToolNames(names: string[]): Set<string> {
+	const counts = new Map<string, number>();
+	for (const n of names) {
+		counts.set(n, (counts.get(n) ?? 0) + 1);
+	}
+	const dups = new Set<string>();
+	for (const [n, c] of counts) {
+		if (c > 1) dups.add(n);
+	}
+	return dups;
+}
+
+// conflictIssue returns an error-severity issue when effectiveName appears in
+// the supplied duplicate set, otherwise undefined. Callers fold this into the
+// list they pass to `ToolNameIssueIcon` via `extraIssues`.
+export function conflictIssue(
+	effectiveName: string,
+	duplicates: Set<string>
+): ToolNameIssue | undefined {
+	if (!duplicates.has(effectiveName)) return undefined;
+	return {
+		severity: 'error',
+		message: `Tool name is not unique. ${TOOL_NAME_FIX_HINT}`
+	};
+}

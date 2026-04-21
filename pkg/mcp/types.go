@@ -80,9 +80,10 @@ type File struct {
 }
 
 type ComponentServer struct {
-	Name  string               `json:"name"`
-	URL   string               `json:"url"`
-	Tools []types.ToolOverride `json:"tools"`
+	Name       string               `json:"name"`
+	URL        string               `json:"url"`
+	Tools      []types.ToolOverride `json:"tools"`
+	ToolPrefix string               `json:"toolPrefix"`
 }
 
 var envVarRegex = regexp.MustCompile(`\${([^}]+)}`)
@@ -154,9 +155,10 @@ func CompositeServerToServerConfig(mcpServer v1.MCPServer, components []v1.MCPSe
 		}
 
 		config.Components = append(config.Components, ComponentServer{
-			Name:  name,
-			URL:   system.MCPConnectURL(issuer, component.Name),
-			Tools: tools,
+			Name:       name,
+			URL:        system.MCPConnectURL(issuer, component.Name),
+			Tools:      tools,
+			ToolPrefix: override.ToolPrefix,
 		})
 	}
 
@@ -179,9 +181,10 @@ func CompositeServerToServerConfig(mcpServer v1.MCPServer, components []v1.MCPSe
 		}
 
 		config.Components = append(config.Components, ComponentServer{
-			Name:  instance.Name,
-			URL:   system.MCPConnectURL(issuer, instance.Name),
-			Tools: tools,
+			Name:       instance.Name,
+			URL:        system.MCPConnectURL(issuer, instance.Name),
+			Tools:      tools,
+			ToolPrefix: override.ToolPrefix,
 		})
 	}
 
