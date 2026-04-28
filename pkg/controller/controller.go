@@ -13,6 +13,7 @@ import (
 	"github.com/obot-platform/obot/pkg/controller/handlers/adminworkspace"
 	"github.com/obot-platform/obot/pkg/controller/handlers/deployment"
 	"github.com/obot-platform/obot/pkg/controller/handlers/mcpcatalog"
+	"github.com/obot-platform/obot/pkg/controller/handlers/mcpsecretbinding"
 	"github.com/obot-platform/obot/pkg/controller/handlers/secret"
 	"github.com/obot-platform/obot/pkg/controller/handlers/toolreference"
 	"github.com/obot-platform/obot/pkg/services"
@@ -550,4 +551,10 @@ func (c *Controller) setupLocalK8sRoutes() {
 
 	secretHandler := secret.New(c.services.MCPServerNamespace, c.services.GPTClient)
 	c.localK8sRouter.Type(&corev1.Secret{}).HandlerFunc(secretHandler.UpdateNanobotAgentCreds)
+
+	// Watch source Secrets for secretBindings in the obot namespace.
+	// IncludeRemoved() so a delete event also fans out (mark referenced
+	// MCPServers' bindings as missing on the next reconcile).
+	secretBindingHandler := mcpsecretbinding.New(c.services.Router.Backend(), c.services.ObotNamespace)
+	c.localK8sRouter.Type(&corev1.Secret{}).IncludeRemoved().HandlerFunc(secretBindingHandler.SecretChanged)
 }
