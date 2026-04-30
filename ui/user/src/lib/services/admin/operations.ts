@@ -70,7 +70,15 @@ import type {
 	SystemMCPServer,
 	SystemMCPServerCatalogEntry,
 	SystemMCPServerCatalogEntryManifest,
-	SystemMCPServerManifest
+	SystemMCPServerManifest,
+	AggregatedDeviceMCPServerDetail,
+	AggregatedDeviceMCPServerFilters,
+	AggregatedDeviceMCPServerList,
+	DeviceMCPServerFilterOptionField,
+	DeviceMCPServerOccurrenceList,
+	DeviceScan,
+	DeviceScanList,
+	DeviceScanListFilters
 } from './types';
 import { MCPCompositeDeletionDependencyError } from './types';
 
@@ -1799,6 +1807,74 @@ export async function getSystemMCPServerTools(
 	opts?: { fetch?: Fetcher }
 ): Promise<MCPServerTool[]> {
 	return (await doGet(`/system-mcp-servers/${id}/tools`, opts)) as MCPServerTool[];
+}
+
+// Device scans
+
+export async function listDeviceScans(
+	filters?: DeviceScanListFilters,
+	opts?: { fetch?: Fetcher }
+): Promise<DeviceScanList> {
+	const queryString = buildQueryString(filters ?? {});
+	return (await doGet(
+		`/devices/scans${queryString ? `?${queryString}` : ''}`,
+		opts
+	)) as DeviceScanList;
+}
+
+export async function getDeviceScan(
+	id: number | string,
+	opts?: { fetch?: Fetcher }
+): Promise<DeviceScan> {
+	return (await doGet(`/devices/scans/${id}`, opts)) as DeviceScan;
+}
+
+// Device MCP servers (fleet-wide ConfigHash aggregation)
+
+export async function listAggregatedDeviceMCPServers(
+	filters?: AggregatedDeviceMCPServerFilters,
+	opts?: { fetch?: Fetcher }
+): Promise<AggregatedDeviceMCPServerList> {
+	const queryString = buildQueryString(filters ?? {});
+	return (await doGet(
+		`/devices/mcp-servers${queryString ? `?${queryString}` : ''}`,
+		opts
+	)) as AggregatedDeviceMCPServerList;
+}
+
+export async function getAggregatedDeviceMCPServer(
+	configHash: string,
+	opts?: { fetch?: Fetcher }
+): Promise<AggregatedDeviceMCPServerDetail> {
+	return (await doGet(
+		`/devices/mcp-servers/${encodeURIComponent(configHash)}`,
+		opts
+	)) as AggregatedDeviceMCPServerDetail;
+}
+
+export async function listDeviceMCPServerOccurrences(
+	configHash: string,
+	page: { limit?: number; offset?: number },
+	opts?: { fetch?: Fetcher }
+): Promise<DeviceMCPServerOccurrenceList> {
+	const queryString = buildQueryString(page ?? {});
+	return (await doGet(
+		`/devices/mcp-servers/${encodeURIComponent(configHash)}/occurrences${queryString ? `?${queryString}` : ''}`,
+		opts
+	)) as DeviceMCPServerOccurrenceList;
+}
+
+export async function listDeviceMCPServerFilterOptions(
+	field: DeviceMCPServerFilterOptionField,
+	range?: { start?: string; end?: string },
+	opts?: { fetch?: Fetcher }
+): Promise<string[]> {
+	const queryString = buildQueryString(range ?? {});
+	const res = (await doGet(
+		`/devices/mcp-server-filter-options/${field}${queryString ? `?${queryString}` : ''}`,
+		opts
+	)) as { options: string[] | null };
+	return res.options ?? [];
 }
 
 export async function restartNanobotAgentDeployments(opts?: {

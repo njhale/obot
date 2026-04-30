@@ -1117,3 +1117,161 @@ export interface SystemMCPServerCatalogEntry {
 	needsUpdate?: boolean;
 	oauthCredentialConfigured?: boolean;
 }
+
+// Device scans — payload shape matches apiclient/types/devicescan.go.
+
+export interface DeviceScanFile {
+	path: string;
+	size_bytes: number;
+	oversized: boolean;
+	content?: string;
+}
+
+export interface DeviceScanMCPServer {
+	client: string;
+	scope: string;
+	project_path?: string;
+	config_file?: string;
+	plugin_file?: string;
+	config_hash?: string;
+	env_keys: string[];
+	header_keys: string[];
+	name: string;
+	transport: string;
+	command?: string;
+	args?: string[];
+	url?: string;
+}
+
+export interface DeviceScanSkill {
+	client: string;
+	scope: string;
+	plugin_file?: string;
+	name: string;
+	description?: string;
+	files: string[];
+	has_scripts: boolean;
+	git_remote_url?: string;
+}
+
+export interface DeviceScanPlugin {
+	client: string;
+	scope: string;
+	name: string;
+	plugin_type: string;
+	plugin_file?: string;
+	version?: string;
+	description?: string;
+	author?: string;
+	marketplace?: string;
+	files: string[];
+	enabled: boolean;
+	has_mcp_servers: boolean;
+	has_skills: boolean;
+	has_rules: boolean;
+	has_commands: boolean;
+	has_hooks: boolean;
+}
+
+export interface DeviceScan {
+	id: number;
+	received_at: string;
+	submitted_by?: string;
+	scanner_version: string;
+	scanned_at: string;
+	device_id: string;
+	hostname: string;
+	os: string;
+	arch: string;
+	username?: string;
+	files: DeviceScanFile[];
+	mcp_servers: DeviceScanMCPServer[];
+	skills: DeviceScanSkill[];
+	plugins: DeviceScanPlugin[];
+}
+
+export interface DeviceScanList {
+	items: DeviceScan[] | null;
+	total: number;
+	limit: number;
+	offset: number;
+}
+
+export type DeviceScanListFilters = {
+	limit?: number;
+	offset?: number;
+	submittedBy?: string[];
+	deviceId?: string[];
+	groupByDevice?: boolean;
+};
+
+// Aggregated MCP server view: one row per ConfigHash collapsed across
+// every device's latest scan within the requested time window.
+
+export interface AggregatedDeviceMCPServer {
+	config_hash: string;
+	name: string;
+	transport: string;
+	command?: string;
+	url?: string;
+	device_count: number;
+	user_count: number;
+	client_count: number;
+	scope_count: number;
+	observation_count: number;
+	first_seen: string;
+	last_seen: string;
+}
+
+export interface AggregatedDeviceMCPServerList {
+	items: AggregatedDeviceMCPServer[] | null;
+	total: number;
+	limit: number;
+	offset: number;
+}
+
+export interface AggregatedDeviceMCPServerDetail extends AggregatedDeviceMCPServer {
+	args?: string[];
+	env_keys: string[];
+	header_keys: string[];
+}
+
+export interface DeviceMCPServerOccurrence {
+	device_scan_id: number;
+	device_id: string;
+	client: string;
+	scope: string;
+	scanned_at: string;
+	index: number;
+}
+
+export interface DeviceMCPServerOccurrenceList {
+	items: DeviceMCPServerOccurrence[] | null;
+	total: number;
+	limit: number;
+	offset: number;
+}
+
+export type AggregatedDeviceMCPServerSortKey =
+	| 'name'
+	| 'device_count'
+	| 'user_count'
+	| 'client_count'
+	| 'first_seen'
+	| 'last_seen';
+
+export type AggregatedDeviceMCPServerFilters = {
+	limit?: number;
+	offset?: number;
+	start?: string; // RFC3339
+	end?: string; // RFC3339
+	name?: string;
+	command?: string;
+	url?: string;
+	transport?: string[];
+	client?: string[];
+	sortBy?: AggregatedDeviceMCPServerSortKey;
+	sortOrder?: 'asc' | 'desc';
+};
+
+export type DeviceMCPServerFilterOptionField = 'transport' | 'client' | 'scope';

@@ -60,6 +60,7 @@ func Router(ctx context.Context, services *services.Services) (http.Handler, err
 	modelAccessPolicies := handlers.NewModelAccessPolicyHandler()
 	messagePolicies := handlers.NewMessagePolicyHandler()
 	policyViolations := handlers.NewMessagePolicyViolationHandler()
+	deviceScans := handlers.NewDeviceScansHandler()
 	authProviders := handlers.NewAuthProviderHandler(services.ProviderDispatcher, services.PostgresDSN)
 	fileScannerProviders := handlers.NewFileScannerProviderHandler(services.ProviderDispatcher, services.Invoker)
 	prompt := handlers.NewPromptHandler()
@@ -792,6 +793,17 @@ func Router(ctx context.Context, services *services.Services) (http.Handler, err
 		mux.HandleFunc("GET /api/message-policy-violations/{id}", policyViolations.Get)
 		mux.HandleFunc("GET /api/message-policy-violation-stats", policyViolations.GetStats)
 	}
+
+	// Device Scans (`obot scan` ingest + read API)
+	mux.HandleFunc("POST /api/devices/scans", deviceScans.Submit)
+	mux.HandleFunc("GET /api/devices/scans", deviceScans.List)
+	mux.HandleFunc("GET /api/devices/scans/{scan_id}", deviceScans.Get)
+
+	// Device MCP Servers (fleet-wide aggregation by ConfigHash)
+	mux.HandleFunc("GET /api/devices/mcp-servers", deviceScans.ListAggregatedMCPServers)
+	mux.HandleFunc("GET /api/devices/mcp-server-filter-options/{field}", deviceScans.ListMCPServerFilterOptions)
+	mux.HandleFunc("GET /api/devices/mcp-servers/{config_hash}", deviceScans.GetAggregatedMCPServer)
+	mux.HandleFunc("GET /api/devices/mcp-servers/{config_hash}/occurrences", deviceScans.ListMCPServerOccurrences)
 
 	// Available Models
 	mux.HandleFunc("GET /api/available-models", availableModels.List)
