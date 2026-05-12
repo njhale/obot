@@ -23,7 +23,7 @@ func runScanFS(t *testing.T, files map[string]string) types.DeviceScanManifest {
 	clientAppBundleDirs = []string{t.TempDir()}
 	t.Cleanup(func() { clientAppBundleDirs = nil })
 
-	scan, err := Scan(context.Background(), mapfs, "/home/test", 8)
+	scan, err := Scan(context.Background(), mapfs, "/home/test", 8, 0)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}

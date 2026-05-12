@@ -32,6 +32,10 @@ type DeviceScanManifest struct {
 	Plugins []DeviceScanPlugin `json:"plugins"`
 	// Clients are the per-client presence + roll-up rows.
 	Clients []DeviceScanClient `json:"clients"`
+	// TopPrompts is a ranked list of the most token-heavy prompts captured
+	// from local client transcripts. Populated only when the scanner was
+	// invoked with --include-top-prompts > 0; nil/empty otherwise.
+	TopPrompts []DeviceScanPrompt `json:"topPrompts,omitempty"`
 }
 
 // DeviceScan is a persisted scan: the submitted manifest plus
@@ -184,6 +188,38 @@ type DeviceScanPlugin struct {
 	HasCommands bool `json:"hasCommands"`
 	// HasHooks is true when the plugin defines hooks.
 	HasHooks bool `json:"hasHooks"`
+}
+
+// DeviceScanPrompt is one originating user prompt plus the aggregated
+// token usage of every assistant turn (including sub-agents) it triggered
+// until the next originating user turn in the same session. Producer-side
+// summary — the scanner computes this on the device and submits a
+// truncated preview, never the full prompt text.
+type DeviceScanPrompt struct {
+	// Client is the canonical client name (e.g. "claude_code").
+	Client string `json:"client"`
+	// SessionID is the source session UUID.
+	SessionID string `json:"sessionID"`
+	// TurnUUID is the UUID of the originating user turn record.
+	TurnUUID string `json:"turnUUID"`
+	// ProjectPath is the cwd recorded on the originating user turn, if any.
+	ProjectPath string `json:"projectPath,omitempty"`
+	// Preview is the first N runes of the prompt text, capped by the scanner.
+	Preview string `json:"preview"`
+	// StartedAt is the timestamp of the originating user turn.
+	StartedAt Time `json:"startedAt"`
+	// EndedAt is the timestamp of the last assistant turn in the bucket.
+	EndedAt Time `json:"endedAt"`
+	// InputTokens is the sum of message.usage.input_tokens across the bucket.
+	InputTokens int64 `json:"inputTokens"`
+	// OutputTokens is the sum of message.usage.output_tokens.
+	OutputTokens int64 `json:"outputTokens"`
+	// CacheCreateTokens is the sum of message.usage.cache_creation_input_tokens.
+	CacheCreateTokens int64 `json:"cacheCreateTokens"`
+	// CacheReadTokens is the sum of message.usage.cache_read_input_tokens.
+	CacheReadTokens int64 `json:"cacheReadTokens"`
+	// TotalTokens is the sum of the four components above; the ranking key.
+	TotalTokens int64 `json:"totalTokens"`
 }
 
 // DeviceMCPServerStat is one row of the fleet-wide MCP aggregation,

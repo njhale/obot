@@ -32,6 +32,11 @@ type DeviceScan struct {
 	Plugins    []DeviceScanPlugin    `json:"plugins,omitempty"    gorm:"foreignKey:DeviceScanID;constraint:OnDelete:CASCADE"`
 	Files      []DeviceScanFile      `json:"files,omitempty"      gorm:"foreignKey:DeviceScanID;constraint:OnDelete:CASCADE"`
 	Clients    []DeviceScanClient    `json:"clients,omitempty"    gorm:"foreignKey:DeviceScanID;constraint:OnDelete:CASCADE"`
+
+	// TopPrompts is the producer-side top-K ranked prompt summary. Stored
+	// inline as JSON because v1 only needs per-device retrieval; promote
+	// to a child table if/when fleet-wide aggregation is wanted.
+	TopPrompts datatypes.JSONSlice[types2.DeviceScanPrompt] `json:"topPrompts,omitempty"`
 }
 
 // DeviceScanMCPServer is one MCP server observation. Scope is derived
@@ -168,6 +173,9 @@ func ConvertDeviceScan(s DeviceScan) types2.DeviceScan {
 		for i, c := range s.Clients {
 			out.Clients[i] = ConvertDeviceScanClient(c)
 		}
+	}
+	if len(s.TopPrompts) > 0 {
+		out.TopPrompts = []types2.DeviceScanPrompt(s.TopPrompts)
 	}
 	return out
 }
@@ -430,6 +438,9 @@ func DeviceScanFromManifest(p types2.DeviceScanManifest) DeviceScan {
 				HasPlugins:    c.HasPlugins,
 			}
 		}
+	}
+	if len(p.TopPrompts) > 0 {
+		s.TopPrompts = datatypes.JSONSlice[types2.DeviceScanPrompt](p.TopPrompts)
 	}
 	return s
 }

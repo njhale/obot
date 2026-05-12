@@ -189,7 +189,7 @@ func TestScanHermes_SkillsAttribution(t *testing.T) {
 		t.Fatalf("write SKILL.md: %v", err)
 	}
 
-	scan, err := Scan(context.Background(), os.DirFS(home), home, 8)
+	scan, err := Scan(context.Background(), os.DirFS(home), home, 8, 0)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}

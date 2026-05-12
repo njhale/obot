@@ -1193,6 +1193,21 @@ export interface DeviceScanClient {
 	hasPlugins: boolean;
 }
 
+export interface DeviceScanPrompt {
+	client: string;
+	sessionID: string;
+	turnUUID: string;
+	projectPath?: string;
+	preview: string;
+	startedAt: string;
+	endedAt: string;
+	inputTokens: number;
+	outputTokens: number;
+	cacheCreateTokens: number;
+	cacheReadTokens: number;
+	totalTokens: number;
+}
+
 export interface DeviceScan {
 	id: number;
 	receivedAt: string;
@@ -1209,6 +1224,7 @@ export interface DeviceScan {
 	skills: DeviceScanSkill[];
 	plugins: DeviceScanPlugin[];
 	clients: DeviceScanClient[];
+	topPrompts?: DeviceScanPrompt[];
 }
 
 export interface DeviceScanList {

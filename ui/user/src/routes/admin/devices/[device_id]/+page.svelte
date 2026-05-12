@@ -11,16 +11,17 @@
 		type DeviceScanClient,
 		type DeviceScanMCPServer,
 		type DeviceScanPlugin,
+		type DeviceScanPrompt,
 		type DeviceScanSkill,
 		type OrgUser
 	} from '$lib/services';
 	import { formatTimeAgo } from '$lib/time';
 	import { goto } from '$lib/url';
 	import { openUrl } from '$lib/utils';
-	import { Boxes, Cpu, MonitorCheck, PencilRuler, Server } from 'lucide-svelte';
+	import { Boxes, Cpu, MessagesSquare, MonitorCheck, PencilRuler, Server } from 'lucide-svelte';
 	import { fly } from 'svelte/transition';
 
-	type Tab = 'mcp' | 'skills' | 'plugins' | 'clients';
+	type Tab = 'mcp' | 'skills' | 'plugins' | 'clients' | 'prompts';
 
 	const PAGE_SIZE = 50;
 
@@ -57,6 +58,7 @@
 	let skills = $derived<DeviceScanSkill[]>(latest?.skills ?? []);
 	let plugins = $derived<DeviceScanPlugin[]>(latest?.plugins ?? []);
 	let clients = $derived<DeviceScanClient[]>(latest?.clients ?? []);
+	let topPrompts = $derived<DeviceScanPrompt[]>(latest?.topPrompts ?? []);
 
 	type MCPRow = DeviceScanMCPServer & {
 		id: number;
@@ -78,6 +80,25 @@
 		paths_display: string;
 		has_display: string;
 	};
+	type PromptRow = {
+		id: string;
+		client: string;
+		preview: string;
+		total_tokens: string;
+		input_tokens: string;
+		output_tokens: string;
+		cache_create_tokens: string;
+		cache_read_tokens: string;
+		started_relative: string;
+		started_full: string;
+		project_path: string;
+		session_id: string;
+	};
+
+	const numberFormatter = new Intl.NumberFormat();
+	function fmtTokens(n: number): string {
+		return numberFormatter.format(n);
+	}
 
 	function deriveScope(projectPath?: string): string {
 		return projectPath ? 'project' : 'global';
@@ -150,6 +171,26 @@
 			paths_display: clientPathsSummary(c),
 			has_display: clientHasSummary(c)
 		}))
+	);
+
+	let promptRows = $derived<PromptRow[]>(
+		topPrompts.map((p, i) => {
+			const started = formatTimeAgo(p.startedAt);
+			return {
+				id: `${p.sessionID}-${p.turnUUID}-${i}`,
+				client: p.client,
+				preview: p.preview,
+				total_tokens: fmtTokens(p.totalTokens),
+				input_tokens: fmtTokens(p.inputTokens),
+				output_tokens: fmtTokens(p.outputTokens),
+				cache_create_tokens: fmtTokens(p.cacheCreateTokens),
+				cache_read_tokens: fmtTokens(p.cacheReadTokens),
+				started_relative: started.relativeTime,
+				started_full: started.fullDate,
+				project_path: p.projectPath ?? '',
+				session_id: p.sessionID
+			};
+		})
 	);
 
 	type HistoryRow = {
@@ -287,6 +328,16 @@
 						<MonitorCheck class="size-4" /> Clients
 						<span class="text-on-surface1">({clients.length})</span>
 					</button>
+					{#if topPrompts.length > 0}
+						<button
+							class="tab-button"
+							class:tab-active={activeTab === 'prompts'}
+							onclick={() => (activeTab = 'prompts')}
+						>
+							<MessagesSquare class="size-4" /> Top Prompts
+							<span class="text-on-surface1">({topPrompts.length})</span>
+						</button>
+					{/if}
 				</div>
 
 				{#if activeTab === 'mcp'}
@@ -401,6 +452,51 @@
 									<span class="font-mono text-xs">{d.version ?? '—'}</span>
 								{:else}
 									{d[property as keyof PluginRow] ?? '—'}
+								{/if}
+							{/snippet}
+						</Table>
+					{/if}
+				{:else if activeTab === 'prompts'}
+					{#if promptRows.length === 0}
+						{@render emptyTab(
+							'No top prompts captured for this scan. Re-run with --include-top-prompts > 0 to enable.'
+						)}
+					{:else}
+						<Table
+							data={promptRows}
+							pageSize={PAGE_SIZE}
+							fields={[
+								'preview',
+								'total_tokens',
+								'input_tokens',
+								'output_tokens',
+								'cache_create_tokens',
+								'cache_read_tokens',
+								'started_relative',
+								'project_path'
+							]}
+							headers={[
+								{ title: 'Prompt (preview)', property: 'preview' },
+								{ title: 'Total', property: 'total_tokens' },
+								{ title: 'Input', property: 'input_tokens' },
+								{ title: 'Output', property: 'output_tokens' },
+								{ title: 'Cache create', property: 'cache_create_tokens' },
+								{ title: 'Cache read', property: 'cache_read_tokens' },
+								{ title: 'Started', property: 'started_relative' },
+								{ title: 'Project', property: 'project_path' }
+							]}
+							sortable={['total_tokens', 'started_relative']}
+							filterable={['client']}
+						>
+							{#snippet onRenderColumn(property, d: PromptRow)}
+								{#if property === 'preview'}
+									<span class="text-xs">{d.preview || '—'}</span>
+								{:else if property === 'project_path'}
+									<span class="font-mono text-xs">{d.project_path || '—'}</span>
+								{:else if property === 'started_relative'}
+									<span use:tooltip={d.started_full}>{d.started_relative}</span>
+								{:else}
+									<span class="font-mono text-xs">{d[property as keyof PromptRow] ?? '—'}</span>
 								{/if}
 							{/snippet}
 						</Table>

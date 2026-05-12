@@ -70,6 +70,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanMCPServer":                                schema_obot_platform_obot_apiclient_types_DeviceScanMCPServer(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanManifest":                                 schema_obot_platform_obot_apiclient_types_DeviceScanManifest(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanPlugin":                                   schema_obot_platform_obot_apiclient_types_DeviceScanPlugin(ref),
+		"github.com/obot-platform/obot/apiclient/types.DeviceScanPrompt":                                   schema_obot_platform_obot_apiclient_types_DeviceScanPrompt(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanResponse":                                 schema_obot_platform_obot_apiclient_types_DeviceScanResponse(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanSkill":                                    schema_obot_platform_obot_apiclient_types_DeviceScanSkill(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanStats":                                    schema_obot_platform_obot_apiclient_types_DeviceScanStats(ref),
@@ -3261,6 +3262,20 @@ func schema_obot_platform_obot_apiclient_types_DeviceScan(ref common.ReferenceCa
 							},
 						},
 					},
+					"topPrompts": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TopPrompts is a ranked list of the most token-heavy prompts captured from local client transcripts. Populated only when the scanner was invoked with --include-top-prompts > 0; nil/empty otherwise.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPrompt"),
+									},
+								},
+							},
+						},
+					},
 					"id": {
 						SchemaProps: spec.SchemaProps{
 							Description: "ID is the server-assigned primary key.",
@@ -3288,7 +3303,7 @@ func schema_obot_platform_obot_apiclient_types_DeviceScan(ref common.ReferenceCa
 			},
 		},
 		Dependencies: []string{
-			"github.com/obot-platform/obot/apiclient/types.DeviceScanClient", "github.com/obot-platform/obot/apiclient/types.DeviceScanFile", "github.com/obot-platform/obot/apiclient/types.DeviceScanMCPServer", "github.com/obot-platform/obot/apiclient/types.DeviceScanPlugin", "github.com/obot-platform/obot/apiclient/types.DeviceScanSkill", "github.com/obot-platform/obot/apiclient/types.Time"},
+			"github.com/obot-platform/obot/apiclient/types.DeviceScanClient", "github.com/obot-platform/obot/apiclient/types.DeviceScanFile", "github.com/obot-platform/obot/apiclient/types.DeviceScanMCPServer", "github.com/obot-platform/obot/apiclient/types.DeviceScanPlugin", "github.com/obot-platform/obot/apiclient/types.DeviceScanPrompt", "github.com/obot-platform/obot/apiclient/types.DeviceScanSkill", "github.com/obot-platform/obot/apiclient/types.Time"},
 	}
 }
 
@@ -3694,12 +3709,26 @@ func schema_obot_platform_obot_apiclient_types_DeviceScanManifest(ref common.Ref
 							},
 						},
 					},
+					"topPrompts": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TopPrompts is a ranked list of the most token-heavy prompts captured from local client transcripts. Populated only when the scanner was invoked with --include-top-prompts > 0; nil/empty otherwise.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPrompt"),
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"scannerVersion", "scannedAt", "deviceID", "hostname", "os", "arch", "files", "mcpServers", "skills", "plugins", "clients"},
 			},
 		},
 		Dependencies: []string{
-			"github.com/obot-platform/obot/apiclient/types.DeviceScanClient", "github.com/obot-platform/obot/apiclient/types.DeviceScanFile", "github.com/obot-platform/obot/apiclient/types.DeviceScanMCPServer", "github.com/obot-platform/obot/apiclient/types.DeviceScanPlugin", "github.com/obot-platform/obot/apiclient/types.DeviceScanSkill", "github.com/obot-platform/obot/apiclient/types.Time"},
+			"github.com/obot-platform/obot/apiclient/types.DeviceScanClient", "github.com/obot-platform/obot/apiclient/types.DeviceScanFile", "github.com/obot-platform/obot/apiclient/types.DeviceScanMCPServer", "github.com/obot-platform/obot/apiclient/types.DeviceScanPlugin", "github.com/obot-platform/obot/apiclient/types.DeviceScanPrompt", "github.com/obot-platform/obot/apiclient/types.DeviceScanSkill", "github.com/obot-platform/obot/apiclient/types.Time"},
 	}
 }
 
@@ -3850,6 +3879,113 @@ func schema_obot_platform_obot_apiclient_types_DeviceScanPlugin(ref common.Refer
 				Required: []string{"client", "name", "pluginType", "files", "enabled", "hasMCPServers", "hasSkills", "hasRules", "hasCommands", "hasHooks"},
 			},
 		},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_DeviceScanPrompt(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DeviceScanPrompt is one originating user prompt plus the aggregated token usage of every assistant turn (including sub-agents) it triggered until the next originating user turn in the same session. Producer-side summary — the scanner computes this on the device and submits a truncated preview, never the full prompt text.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"client": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Client is the canonical client name (e.g. \"claude_code\").",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"sessionID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SessionID is the source session UUID.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"turnUUID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TurnUUID is the UUID of the originating user turn record.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"projectPath": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ProjectPath is the cwd recorded on the originating user turn, if any.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"preview": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Preview is the first N runes of the prompt text, capped by the scanner.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"startedAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StartedAt is the timestamp of the originating user turn.",
+							Ref:         ref("github.com/obot-platform/obot/apiclient/types.Time"),
+						},
+					},
+					"endedAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "EndedAt is the timestamp of the last assistant turn in the bucket.",
+							Ref:         ref("github.com/obot-platform/obot/apiclient/types.Time"),
+						},
+					},
+					"inputTokens": {
+						SchemaProps: spec.SchemaProps{
+							Description: "InputTokens is the sum of message.usage.input_tokens across the bucket.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"outputTokens": {
+						SchemaProps: spec.SchemaProps{
+							Description: "OutputTokens is the sum of message.usage.output_tokens.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"cacheCreateTokens": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CacheCreateTokens is the sum of message.usage.cache_creation_input_tokens.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"cacheReadTokens": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CacheReadTokens is the sum of message.usage.cache_read_input_tokens.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"totalTokens": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TotalTokens is the sum of the four components above; the ranking key.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+				Required: []string{"client", "sessionID", "turnUUID", "preview", "startedAt", "endedAt", "inputTokens", "outputTokens", "cacheCreateTokens", "cacheReadTokens", "totalTokens"},
+			},
+		},
+		Dependencies: []string{
+			"github.com/obot-platform/obot/apiclient/types.Time"},
 	}
 }
 

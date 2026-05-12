@@ -34,7 +34,10 @@ var log = logger.Package()
 //
 // maxDepth caps how deep the project walk descends from the home root
 // when looking for project-scope configs and SKILL.md files.
-func Scan(ctx context.Context, fsys fs.FS, homeAbs string, maxDepth int) (types.DeviceScanManifest, error) {
+//
+// topPrompts > 0 enables per-client transcript parsing to surface the
+// top-K most token-heavy user prompts; 0 leaves manifest.TopPrompts nil.
+func Scan(ctx context.Context, fsys fs.FS, homeAbs string, maxDepth, topPrompts int) (types.DeviceScanManifest, error) {
 	s := newScanState(fsys, homeAbs)
 
 	var (
@@ -101,8 +104,15 @@ func Scan(ctx context.Context, fsys fs.FS, homeAbs string, maxDepth int) (types.
 	}
 	scanClientPresence(s, homeAbs)
 
-	// Phase 7: assemble.
-	return build(s, mcps, skills, plugins), nil
+	// Phase 7: per-client transcript prompts (opt-in).
+	manifest := build(s, mcps, skills, plugins)
+	if topPrompts > 0 {
+		if err := ctx.Err(); err != nil {
+			return types.DeviceScanManifest{}, err
+		}
+		manifest.TopPrompts = claudeCodeScanner{}.ScanPrompts(s, topPrompts)
+	}
+	return manifest, nil
 }
 
 // build flattens the accumulated state and observation slices into a

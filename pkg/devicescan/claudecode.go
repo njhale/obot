@@ -1,10 +1,14 @@
 package devicescan
 
 import (
+	"bufio"
+	"encoding/json"
 	"io/fs"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/obot-platform/obot/apiclient/types"
 )
@@ -14,6 +18,19 @@ const (
 	claudeSettingsRel         = ".claude/settings.json"
 	claudeInstalledPluginsRel = ".claude/plugins/installed_plugins.json"
 	claudePluginManifestSub   = ".claude-plugin/plugin.json"
+	claudeProjectsRel         = ".claude/projects"
+
+	// claudePromptPreviewRunes caps preview length so prompt text leaving
+	// the device is bounded. 200 runes ≈ one tweet; enough to identify a
+	// prompt by sight but not enough to leak whole prompts.
+	claudePromptPreviewRunes = 200
+	// claudePromptWindow is the lookback for which session files are
+	// parsed; older files are skipped by mtime.
+	claudePromptWindow = 30 * 24 * time.Hour
+	// claudePromptScanBufferBytes raises bufio.Scanner's per-line limit;
+	// transcript lines (especially attachment payloads) routinely exceed
+	// the default 64 KiB.
+	claudePromptScanBufferBytes = 10 << 20 // 10 MiB
 )
 
 // claudeCodeConfig is the shape of ~/.claude.json: a global mcpServers
@@ -169,6 +186,155 @@ func splitPluginKey(key string) (name, marketplace string) {
 		return key, ""
 	}
 	return key[:at], key[at+1:]
+}
+
+// ScanPrompts walks Claude Code's per-session transcript JSONL files
+// under ~/.claude/projects and returns the top-K originating user
+// prompts ranked by total tokens. A bucket spans from one originating
+// user turn to the next; every assistant turn in between (including
+// sub-agents, which share the same file linked by parentUuid) rolls up.
+// Preview is the first claudePromptPreviewRunes runes of the prompt
+// text. Files older than claudePromptWindow are skipped by mtime.
+func (claudeCodeScanner) ScanPrompts(s *scanState, topK int) []types.DeviceScanPrompt {
+	if topK <= 0 {
+		return nil
+	}
+	dirs, err := fs.ReadDir(s.fsys, claudeProjectsRel)
+	if err != nil {
+		return nil
+	}
+	cutoff := time.Now().Add(-claudePromptWindow)
+
+	var out []types.DeviceScanPrompt
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		dirRel := path.Join(claudeProjectsRel, d.Name())
+		files, err := fs.ReadDir(s.fsys, dirRel)
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+				continue
+			}
+			info, err := f.Info()
+			if err != nil || info.ModTime().Before(cutoff) {
+				continue
+			}
+			out = append(out, parseClaudeCodeTranscript(s.fsys, path.Join(dirRel, f.Name()))...)
+		}
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].TotalTokens > out[j].TotalTokens })
+	if len(out) > topK {
+		out = out[:topK]
+	}
+	return out
+}
+
+// claudeCodeTurnRecord is the minimal subset of a Claude Code transcript
+// record we decode. Content is RawMessage so we can cheaply tell a
+// user-typed prompt (string body) from a tool-result user record (array
+// body) without fully unmarshalling tool result payloads.
+type claudeCodeTurnRecord struct {
+	Type        string    `json:"type"`
+	UUID        string    `json:"uuid"`
+	SessionID   string    `json:"sessionId"`
+	IsSidechain bool      `json:"isSidechain"`
+	Timestamp   time.Time `json:"timestamp"`
+	CWD         string    `json:"cwd"`
+	Message     struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+		Usage   struct {
+			InputTokens              int64 `json:"input_tokens"`
+			OutputTokens             int64 `json:"output_tokens"`
+			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+		} `json:"usage"`
+	} `json:"message"`
+}
+
+// parseClaudeCodeTranscript streams one session JSONL file and produces
+// one DeviceScanPrompt per originating user turn. Records appear in
+// chronological order in the file, so a single forward pass aggregates
+// every assistant turn (including sub-agents) into the current bucket.
+func parseClaudeCodeTranscript(fsys fs.FS, rel string) []types.DeviceScanPrompt {
+	f, err := fsys.Open(rel)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), claudePromptScanBufferBytes)
+
+	var (
+		out     []types.DeviceScanPrompt
+		current *types.DeviceScanPrompt
+	)
+	flush := func() {
+		if current != nil {
+			current.TotalTokens = current.InputTokens + current.OutputTokens +
+				current.CacheCreateTokens + current.CacheReadTokens
+			out = append(out, *current)
+			current = nil
+		}
+	}
+
+	for sc.Scan() {
+		var r claudeCodeTurnRecord
+		if err := json.Unmarshal(sc.Bytes(), &r); err != nil {
+			continue
+		}
+		switch r.Type {
+		case "user":
+			var promptText string
+			if err := json.Unmarshal(r.Message.Content, &promptText); err != nil {
+				// Non-string content (tool_result array) folds into the
+				// current bucket rather than starting a new one.
+				continue
+			}
+			flush()
+			current = &types.DeviceScanPrompt{
+				Client:      "claude_code",
+				SessionID:   r.SessionID,
+				TurnUUID:    r.UUID,
+				ProjectPath: r.CWD,
+				Preview:     truncateRunes(promptText, claudePromptPreviewRunes),
+				StartedAt:   types.Time{Time: r.Timestamp},
+				EndedAt:     types.Time{Time: r.Timestamp},
+			}
+		case "assistant":
+			if current == nil {
+				continue
+			}
+			current.InputTokens += r.Message.Usage.InputTokens
+			current.OutputTokens += r.Message.Usage.OutputTokens
+			current.CacheCreateTokens += r.Message.Usage.CacheCreationInputTokens
+			current.CacheReadTokens += r.Message.Usage.CacheReadInputTokens
+			if r.Timestamp.After(current.EndedAt.Time) {
+				current.EndedAt = types.Time{Time: r.Timestamp}
+			}
+		}
+	}
+	flush()
+	return out
+}
+
+// truncateRunes returns s with at most n runes. Safe across multi-byte
+// UTF-8 boundaries.
+func truncateRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 // relUnderHome converts an absolute path into its fs-relative form when

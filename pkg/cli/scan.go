@@ -25,7 +25,8 @@ type Scan struct {
 	DeviceID string `usage:"Override the persisted device identifier. Empty resolves via OBOT_SCAN_DEVICE_ID env var or the file at $XDG_DATA_HOME/obot/device_id (generated on first run)" env:"OBOT_SCAN_DEVICE_ID"`
 	DryRun   bool   `usage:"Print the scan payload to stdout without submitting it" env:"OBOT_SCAN_DRY_RUN"`
 	Timeout  int    `usage:"Number of seconds to wait for the scan to complete" default:"60" env:"OBOT_SCAN_TIMEOUT"`
-	MaxDepth int    `usage:"Maximum path depth (in segments below $HOME) to match when crawling for project-scope configs and skills; e.g. 5 matches files up to $HOME/a/b/c/d/e" default:"5" env:"OBOT_SCAN_MAX_DEPTH"`
+	MaxDepth          int `usage:"Maximum path depth (in segments below $HOME) to match when crawling for project-scope configs and skills; e.g. 5 matches files up to $HOME/a/b/c/d/e" default:"5" env:"OBOT_SCAN_MAX_DEPTH"`
+	IncludeTopPrompts int `usage:"When >0, include the top-K most token-heavy Claude Code prompts (with a truncated preview) from local transcript logs in ~/.claude/projects. 0 disables." default:"0" env:"OBOT_SCAN_INCLUDE_TOP_PROMPTS"`
 
 	root *Obot
 }
@@ -70,7 +71,7 @@ func (s *Scan) Run(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to get user home dir: %w", err)
 	}
 
-	collected, err := devicescan.Scan(ctx, os.DirFS(homePath), homePath, s.MaxDepth)
+	collected, err := devicescan.Scan(ctx, os.DirFS(homePath), homePath, s.MaxDepth, s.IncludeTopPrompts)
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
@@ -80,6 +81,7 @@ func (s *Scan) Run(cmd *cobra.Command, _ []string) error {
 	manifest.Skills = collected.Skills
 	manifest.Plugins = collected.Plugins
 	manifest.Clients = collected.Clients
+	manifest.TopPrompts = collected.TopPrompts
 
 	if s.DryRun {
 		enc := json.NewEncoder(cmd.OutOrStdout())
