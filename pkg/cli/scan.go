@@ -19,6 +19,10 @@ import (
 	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/pkg/devicescan"
 	"github.com/obot-platform/obot/pkg/devicescan/prompts"
+
+	// Side-effect import: each prompt scanner sub-package registers
+	// itself with the shared registry in init(). New clients land here.
+	_ "github.com/obot-platform/obot/pkg/devicescan/prompts/claudecode"
 	"github.com/obot-platform/obot/pkg/version"
 	"github.com/spf13/cobra"
 )
