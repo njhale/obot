@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/user"
@@ -17,15 +18,26 @@ import (
 	"github.com/google/uuid"
 	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/pkg/devicescan"
+	"github.com/obot-platform/obot/pkg/devicescan/prompts"
 	"github.com/obot-platform/obot/pkg/version"
 	"github.com/spf13/cobra"
 )
 
+// promptScanWindow is the hardcoded 30-day look-back window for
+// prompt scanning (DESIGN.md "Ranking window"). Locked at this layer
+// because all registered PromptScanners must use the same window.
+const promptScanWindow = 30 * 24 * time.Hour
+
+// maxIncludeTopPrompts is the cap on --include-top-prompts. Matches
+// the server-side cap on DeviceScanManifest.TopPrompts.
+const maxIncludeTopPrompts = 10
+
 type Scan struct {
-	DeviceID string `usage:"Override the persisted device identifier. Empty resolves via OBOT_SCAN_DEVICE_ID env var or the file at $XDG_DATA_HOME/obot/device_id (generated on first run)" env:"OBOT_SCAN_DEVICE_ID"`
-	DryRun   bool   `usage:"Print the scan payload to stdout without submitting it" env:"OBOT_SCAN_DRY_RUN"`
-	Timeout  int    `usage:"Number of seconds to wait for the scan to complete" default:"60" env:"OBOT_SCAN_TIMEOUT"`
-	MaxDepth int    `usage:"Maximum path depth (in segments below $HOME) to match when crawling for project-scope configs and skills; e.g. 5 matches files up to $HOME/a/b/c/d/e" default:"5" env:"OBOT_SCAN_MAX_DEPTH"`
+	DeviceID          string `usage:"Override the persisted device identifier. Empty resolves via OBOT_SCAN_DEVICE_ID env var or the file at $XDG_DATA_HOME/obot/device_id (generated on first run)" env:"OBOT_SCAN_DEVICE_ID"`
+	DryRun            bool   `usage:"Print the scan payload to stdout without submitting it" env:"OBOT_SCAN_DRY_RUN"`
+	Timeout           int    `usage:"Number of seconds to wait for the scan to complete" default:"60" env:"OBOT_SCAN_TIMEOUT"`
+	MaxDepth          int    `usage:"Maximum path depth (in segments below $HOME) to match when crawling for project-scope configs and skills; e.g. 5 matches files up to $HOME/a/b/c/d/e" default:"5" env:"OBOT_SCAN_MAX_DEPTH"`
+	IncludeTopPrompts int    `usage:"Opt-in: extract and upload the top N (1..10) highest token-usage prompts from local AI client session logs over the last 30 days. When set, the truncated prompt text (≤2 KiB) and a SHA-256 of the full text are included alongside aggregate metrics. 0 disables (default)." default:"0" env:"OBOT_SCAN_INCLUDE_TOP_PROMPTS"`
 
 	root *Obot
 }
@@ -37,6 +49,10 @@ func (s *Scan) Customize(cmd *cobra.Command) {
 }
 
 func (s *Scan) Run(cmd *cobra.Command, _ []string) error {
+	if s.IncludeTopPrompts < 0 || s.IncludeTopPrompts > maxIncludeTopPrompts {
+		return fmt.Errorf("--include-top-prompts must be in [0, %d], got %d", maxIncludeTopPrompts, s.IncludeTopPrompts)
+	}
+
 	deviceID, err := ensureDeviceID(s.DeviceID)
 	if err != nil {
 		return fmt.Errorf("resolve device id: %w", err)
@@ -81,6 +97,10 @@ func (s *Scan) Run(cmd *cobra.Command, _ []string) error {
 	manifest.Plugins = collected.Plugins
 	manifest.Clients = collected.Clients
 
+	if s.IncludeTopPrompts > 0 {
+		manifest.TopPrompts = collectTopPrompts(ctx, cmd.ErrOrStderr(), os.DirFS(homePath), homePath, s.IncludeTopPrompts)
+	}
+
 	if s.DryRun {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
@@ -96,6 +116,34 @@ func (s *Scan) Run(cmd *cobra.Command, _ []string) error {
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(), "Submitted scan #%d (received_at=%s)\n", resp.ID, resp.ReceivedAt.GetTime().Format(time.RFC3339))
 	return nil
+}
+
+// collectTopPrompts fans out to every registered PromptScanner, then
+// merges the results and trims to the global TopK. Per-scanner errors
+// are logged to stderr and skipped — one misbehaving client must not
+// fail the scan submission. With no scanners registered (the case in
+// Phase 1 of M1), this returns nil so the manifest omits topPrompts
+// entirely.
+func collectTopPrompts(ctx context.Context, stderr io.Writer, homeFS fs.FS, homeAbs string, topK int) []types.DeviceScanPrompt {
+	opts := prompts.Options{
+		HomeFS:  homeFS,
+		HomeAbs: homeAbs,
+		Since:   time.Now().Add(-promptScanWindow),
+		TopK:    topK,
+	}
+	var all []types.DeviceScanPrompt
+	for _, s := range prompts.All() {
+		if !s.Presence(opts) {
+			continue
+		}
+		got, err := s.TopPrompts(ctx, opts)
+		if err != nil {
+			fmt.Fprintf(stderr, "obot scan: prompt scanner %q failed: %v\n", s.Client(), err)
+			continue
+		}
+		all = append(all, got...)
+	}
+	return prompts.TopK(all, topK)
 }
 
 // ensureDeviceID returns deviceID if it is non-empty after trimming.
