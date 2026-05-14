@@ -34,6 +34,7 @@ func (c *Client) GetDeviceScan(ctx context.Context, id uint) (*types.DeviceScan,
 		Preload("Plugins").
 		Preload("Files").
 		Preload("Clients").
+		Preload("TopPrompts").
 		First(&s, id).Error; err != nil {
 		return nil, err
 	}
@@ -44,6 +45,41 @@ func (c *Client) GetDeviceScan(ctx context.Context, id uint) (*types.DeviceScan,
 // returns nil when no scan with that id exists.
 func (c *Client) DeleteDeviceScan(ctx context.Context, id uint) error {
 	return c.db.WithContext(ctx).Delete(&types.DeviceScan{}, id).Error
+}
+
+// ListScanPrompts returns the top prompt rows for a scan, ordered by
+// total_tokens DESC and then by ended_at DESC for tie-breaking. limit
+// 0 means no cap.
+func (c *Client) ListScanPrompts(ctx context.Context, scanID uint, limit int) ([]types.DeviceScanPrompt, int64, error) {
+	db := c.db.WithContext(ctx).Model(&types.DeviceScanPrompt{}).Where("device_scan_id = ?", scanID)
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	q := db.Order("total_tokens DESC, ended_at DESC, id ASC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var rows []types.DeviceScanPrompt
+	if err := q.Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
+}
+
+// GetScanPrompt loads a single prompt row by its (scan, chunkID).
+// Returns gorm.ErrRecordNotFound when no such row exists.
+func (c *Client) GetScanPrompt(ctx context.Context, scanID uint, chunkID string) (*types.DeviceScanPrompt, error) {
+	if chunkID == "" {
+		return nil, errors.New("empty chunk id")
+	}
+	var p types.DeviceScanPrompt
+	if err := c.db.WithContext(ctx).
+		Where("device_scan_id = ? AND chunk_id = ?", scanID, chunkID).
+		First(&p).Error; err != nil {
+		return nil, err
+	}
+	return &p, nil
 }
 
 // DeviceScanListOptions filters the scan-envelope list endpoint.

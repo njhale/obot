@@ -32,6 +32,10 @@ type DeviceScanManifest struct {
 	Plugins []DeviceScanPlugin `json:"plugins"`
 	// Clients are the per-client presence + roll-up rows.
 	Clients []DeviceScanClient `json:"clients"`
+	// TopPrompts is populated when --include-top-prompts is set on `obot scan`.
+	// Capped at 10 entries by server validation; sorted by metrics.totalTokens
+	// descending on submission.
+	TopPrompts []DeviceScanPrompt `json:"topPrompts,omitempty"`
 }
 
 // DeviceScan is a persisted scan: the submitted manifest plus
@@ -389,4 +393,118 @@ type DeviceClientFleetSummaryResponse struct {
 	Total                        int64 `json:"total"`
 	Limit                        int    `json:"limit"`
 	Offset                       int    `json:"offset"`
+}
+
+// DeviceScanPrompt is one captured top-level user prompt with rolled-up
+// token usage and tool/subagent activity. Attached to a DeviceScan.
+type DeviceScanPrompt struct {
+	// ID is the row's primary key. Server-set; ignored on submission.
+	ID uint `json:"id,omitempty"`
+	// DeviceScanID is the parent scan's primary key. Server-set.
+	DeviceScanID uint `json:"deviceScanID,omitempty"`
+	// Client is the canonical client identifier (e.g. "claude_code").
+	Client string `json:"client"`
+	// SessionID is the source-session UUID this prompt was extracted from.
+	SessionID string `json:"sessionID"`
+	// ChunkID is a stable per-prompt identifier; unique within a scan.
+	ChunkID string `json:"chunkID"`
+	// Model is the assistant model recorded on the first assistant turn.
+	Model string `json:"model,omitempty"`
+
+	// StartedAt is when the user turn began.
+	StartedAt Time `json:"startedAt"`
+	// EndedAt is when the prompt's last assistant turn completed.
+	EndedAt Time `json:"endedAt"`
+	// DurationMs is EndedAt - StartedAt in milliseconds.
+	DurationMs int64 `json:"durationMs"`
+
+	// Cwd is the working directory recorded on the user entry.
+	Cwd string `json:"cwd,omitempty"`
+	// GitBranch is the active git branch recorded on the user entry.
+	GitBranch string `json:"gitBranch,omitempty"`
+
+	// PromptText is the truncated user prompt (≤2048 bytes, UTF-8 safe).
+	PromptText string `json:"promptText,omitempty"`
+	// PromptHash is the SHA-256 (64 hex chars) of the full untruncated prompt.
+	PromptHash string `json:"promptHash"`
+	// PromptBytes is the full untruncated prompt length in bytes.
+	PromptBytes int64 `json:"promptBytes"`
+
+	// Metrics are the transitive token totals for the prompt
+	// (parent session + every nested subagent).
+	Metrics DeviceScanPromptMetrics `json:"metrics"`
+	// MainMetrics is the parent-session-only token totals (subagent
+	// internal usage excluded). Lets the UI show "parent context cost"
+	// vs "actual cost including subagents" without re-summing.
+	MainMetrics DeviceScanPromptMetrics `json:"mainMetrics"`
+	// ToolCalls aggregates the parent session's tool_use blocks as
+	// {name, count}, sorted by count desc. Tool calls a subagent
+	// performed internally live on the subagent node, not here.
+	ToolCalls []DeviceScanPromptToolCall `json:"toolCalls,omitempty"`
+	// Subagents is the recursive subagent tree rooted at this prompt.
+	// Server-enforced depth cap is 5.
+	Subagents []DeviceScanPromptSubagent `json:"subagents,omitempty"`
+}
+
+// DeviceScanPromptMetrics is the 4-component token breakdown plus the
+// derived TotalTokens used for ranking. Matches claude-devtools'
+// SessionMetrics shape.
+type DeviceScanPromptMetrics struct {
+	InputTokens         int64 `json:"inputTokens"`
+	OutputTokens        int64 `json:"outputTokens"`
+	CacheReadTokens     int64 `json:"cacheReadTokens"`
+	CacheCreationTokens int64 `json:"cacheCreationTokens"`
+	// TotalTokens is the ranking metric. Equal to InputTokens + OutputTokens.
+	TotalTokens int64 `json:"totalTokens"`
+}
+
+// DeviceScanPromptToolCall is one row of the tool-name aggregate.
+type DeviceScanPromptToolCall struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// DeviceScanPromptSubagent is one node in a prompt's recursive
+// subagent tree. CLI caps depth at 5; deeper nodes are folded into
+// their level-5 ancestor's Metrics.
+type DeviceScanPromptSubagent struct {
+	// SubagentType is the subagent's declared type (free-form string).
+	SubagentType string `json:"subagentType,omitempty"`
+	// Description is the subagent's declared description.
+	Description string `json:"description,omitempty"`
+	// Metrics is this node's internal token totals, transitively
+	// summed over its own descendants.
+	Metrics DeviceScanPromptMetrics `json:"metrics"`
+	// MainSessionImpact is the token cost the direct parent paid to
+	// invoke this subagent (Task tool_use input + tool_result output).
+	MainSessionImpact DeviceScanPromptSubagentImpact `json:"mainSessionImpact"`
+	// ToolCalls aggregates this subagent's own tool_use blocks as
+	// {name, count}. Precomputed at scan time because the server
+	// never receives the subagent transcript.
+	ToolCalls []DeviceScanPromptToolCall `json:"toolCalls,omitempty"`
+	// Subagents are the children this subagent spawned via the Task
+	// tool. Recursive; depth capped at 5 across the whole tree.
+	Subagents []DeviceScanPromptSubagent `json:"subagents,omitempty"`
+}
+
+// DeviceScanPromptSubagentImpact is the parent-context cost of
+// invoking a subagent — what the direct parent paid in input/output
+// tokens for the Task call and its result.
+type DeviceScanPromptSubagentImpact struct {
+	// CallTokens is the Task tool_use's input_tokens.
+	CallTokens int64 `json:"callTokens"`
+	// ResultTokens is the Task tool_result's output_tokens.
+	ResultTokens int64 `json:"resultTokens"`
+	// TotalTokens is CallTokens + ResultTokens.
+	TotalTokens int64 `json:"totalTokens"`
+}
+
+type DeviceScanPromptList List[DeviceScanPrompt]
+
+// DeviceScanPromptResponse is returned by GET /api/devices/scans/{id}/prompts.
+type DeviceScanPromptResponse struct {
+	DeviceScanPromptList `json:",inline"`
+	Total                int64 `json:"total"`
+	Limit                int   `json:"limit"`
+	Offset               int   `json:"offset"`
 }

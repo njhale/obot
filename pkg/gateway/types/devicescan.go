@@ -32,6 +32,7 @@ type DeviceScan struct {
 	Plugins    []DeviceScanPlugin    `json:"plugins,omitempty"    gorm:"foreignKey:DeviceScanID;constraint:OnDelete:CASCADE"`
 	Files      []DeviceScanFile      `json:"files,omitempty"      gorm:"foreignKey:DeviceScanID;constraint:OnDelete:CASCADE"`
 	Clients    []DeviceScanClient    `json:"clients,omitempty"    gorm:"foreignKey:DeviceScanID;constraint:OnDelete:CASCADE"`
+	TopPrompts []DeviceScanPrompt    `json:"topPrompts,omitempty" gorm:"foreignKey:DeviceScanID;constraint:OnDelete:CASCADE"`
 }
 
 // DeviceScanMCPServer is one MCP server observation. Scope is derived
@@ -112,6 +113,46 @@ type DeviceScanClient struct {
 	HasPlugins    bool      `json:"hasPlugins"`
 }
 
+// DeviceScanPrompt is one top-level user prompt captured during a
+// scan. tool_calls and subagents persist as JSONB because they are
+// write-once and only ever read back as a whole for the drill-in view.
+// Indexed by (device_scan_id, total_tokens DESC) for the list endpoint.
+type DeviceScanPrompt struct {
+	ID           uint      `json:"id" gorm:"primaryKey"`
+	DeviceScanID uint      `json:"deviceScanID" gorm:"not null;index:idx_dsp_scan_tokens,priority:1"`
+	CreatedAt    time.Time `json:"createdAt" gorm:"index"`
+	Client       string    `json:"client" gorm:"index"`
+	SessionID    string    `json:"sessionID"`
+	ChunkID      string    `json:"chunkID" gorm:"index"`
+	Model        string    `json:"model"`
+
+	StartedAt  time.Time `json:"startedAt" gorm:"index"`
+	EndedAt    time.Time `json:"endedAt"`
+	DurationMs int64     `json:"durationMs"`
+
+	Cwd       string `json:"cwd"`
+	GitBranch string `json:"gitBranch"`
+
+	PromptText  string `json:"promptText" gorm:"type:text"`
+	PromptHash  string `json:"promptHash" gorm:"index"`
+	PromptBytes int64  `json:"promptBytes"`
+
+	InputTokens         int64 `json:"inputTokens"`
+	OutputTokens        int64 `json:"outputTokens"`
+	CacheReadTokens     int64 `json:"cacheReadTokens"`
+	CacheCreationTokens int64 `json:"cacheCreationTokens"`
+	TotalTokens         int64 `json:"totalTokens" gorm:"index:idx_dsp_scan_tokens,priority:2,sort:desc"`
+
+	MainInputTokens         int64 `json:"mainInputTokens"`
+	MainOutputTokens        int64 `json:"mainOutputTokens"`
+	MainCacheReadTokens     int64 `json:"mainCacheReadTokens"`
+	MainCacheCreationTokens int64 `json:"mainCacheCreationTokens"`
+	MainTotalTokens         int64 `json:"mainTotalTokens"`
+
+	ToolCalls datatypes.JSONSlice[types2.DeviceScanPromptToolCall] `json:"toolCalls"`
+	Subagents datatypes.JSONSlice[types2.DeviceScanPromptSubagent] `json:"subagents"`
+}
+
 type DeviceScanFile struct {
 	ID           uint      `json:"id" gorm:"primaryKey"`
 	DeviceScanID uint      `json:"deviceScanID" gorm:"index;not null"`
@@ -169,7 +210,48 @@ func ConvertDeviceScan(s DeviceScan) types2.DeviceScan {
 			out.Clients[i] = ConvertDeviceScanClient(c)
 		}
 	}
+	if len(s.TopPrompts) > 0 {
+		out.TopPrompts = make([]types2.DeviceScanPrompt, len(s.TopPrompts))
+		for i, p := range s.TopPrompts {
+			out.TopPrompts[i] = ConvertDeviceScanPrompt(p)
+		}
+	}
 	return out
+}
+
+func ConvertDeviceScanPrompt(p DeviceScanPrompt) types2.DeviceScanPrompt {
+	return types2.DeviceScanPrompt{
+		ID:           p.ID,
+		DeviceScanID: p.DeviceScanID,
+		Client:       p.Client,
+		SessionID:    p.SessionID,
+		ChunkID:      p.ChunkID,
+		Model:        p.Model,
+		StartedAt:    *types2.NewTime(p.StartedAt),
+		EndedAt:      *types2.NewTime(p.EndedAt),
+		DurationMs:   p.DurationMs,
+		Cwd:          p.Cwd,
+		GitBranch:    p.GitBranch,
+		PromptText:   p.PromptText,
+		PromptHash:   p.PromptHash,
+		PromptBytes:  p.PromptBytes,
+		Metrics: types2.DeviceScanPromptMetrics{
+			InputTokens:         p.InputTokens,
+			OutputTokens:        p.OutputTokens,
+			CacheReadTokens:     p.CacheReadTokens,
+			CacheCreationTokens: p.CacheCreationTokens,
+			TotalTokens:         p.TotalTokens,
+		},
+		MainMetrics: types2.DeviceScanPromptMetrics{
+			InputTokens:         p.MainInputTokens,
+			OutputTokens:        p.MainOutputTokens,
+			CacheReadTokens:     p.MainCacheReadTokens,
+			CacheCreationTokens: p.MainCacheCreationTokens,
+			TotalTokens:         p.MainTotalTokens,
+		},
+		ToolCalls: []types2.DeviceScanPromptToolCall(p.ToolCalls),
+		Subagents: []types2.DeviceScanPromptSubagent(p.Subagents),
+	}
 }
 
 func ConvertDeviceScanClient(c DeviceScanClient) types2.DeviceScanClient {
@@ -428,6 +510,37 @@ func DeviceScanFromManifest(p types2.DeviceScanManifest) DeviceScan {
 				HasMCPServers: c.HasMCPServers,
 				HasSkills:     c.HasSkills,
 				HasPlugins:    c.HasPlugins,
+			}
+		}
+	}
+	if len(p.TopPrompts) > 0 {
+		s.TopPrompts = make([]DeviceScanPrompt, len(p.TopPrompts))
+		for i, pr := range p.TopPrompts {
+			s.TopPrompts[i] = DeviceScanPrompt{
+				Client:                  pr.Client,
+				SessionID:               pr.SessionID,
+				ChunkID:                 pr.ChunkID,
+				Model:                   pr.Model,
+				StartedAt:               pr.StartedAt.GetTime(),
+				EndedAt:                 pr.EndedAt.GetTime(),
+				DurationMs:              pr.DurationMs,
+				Cwd:                     pr.Cwd,
+				GitBranch:               pr.GitBranch,
+				PromptText:              pr.PromptText,
+				PromptHash:              pr.PromptHash,
+				PromptBytes:             pr.PromptBytes,
+				InputTokens:             pr.Metrics.InputTokens,
+				OutputTokens:            pr.Metrics.OutputTokens,
+				CacheReadTokens:         pr.Metrics.CacheReadTokens,
+				CacheCreationTokens:     pr.Metrics.CacheCreationTokens,
+				TotalTokens:             pr.Metrics.TotalTokens,
+				MainInputTokens:         pr.MainMetrics.InputTokens,
+				MainOutputTokens:        pr.MainMetrics.OutputTokens,
+				MainCacheReadTokens:     pr.MainMetrics.CacheReadTokens,
+				MainCacheCreationTokens: pr.MainMetrics.CacheCreationTokens,
+				MainTotalTokens:         pr.MainMetrics.TotalTokens,
+				ToolCalls:               datatypes.JSONSlice[types2.DeviceScanPromptToolCall](pr.ToolCalls),
+				Subagents:               datatypes.JSONSlice[types2.DeviceScanPromptSubagent](pr.Subagents),
 			}
 		}
 	}

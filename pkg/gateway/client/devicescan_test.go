@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	atypes "github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/pkg/gateway/types"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -354,5 +355,99 @@ func TestDeviceClientFleetSummaries(t *testing.T) {
 	}
 	if len(list2) != 1 {
 		t.Fatalf("limit=1 offset=1: want 1 row, got %d", len(list2))
+	}
+}
+
+// TestDeviceScanPrompts exercises top-prompt persistence: write via
+// insertScan, read back via ListScanPrompts (ordered) and GetScanPrompt
+// (single row), and verify the cascade delete clears prompts when the
+// parent scan is deleted.
+func TestDeviceScanPrompts(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	mkPrompt := func(chunkID string, total int64, started time.Time, subagents ...atypes.DeviceScanPromptSubagent) types.DeviceScanPrompt {
+		return types.DeviceScanPrompt{
+			Client:       "claude_code",
+			SessionID:    "session-a",
+			ChunkID:      chunkID,
+			Model:        "claude-opus-4-7",
+			StartedAt:    started,
+			EndedAt:      started.Add(2 * time.Second),
+			DurationMs:   2000,
+			Cwd:          "/repo",
+			GitBranch:    "main",
+			PromptText:   "do the thing",
+			PromptHash:   "0000000000000000000000000000000000000000000000000000000000000000",
+			PromptBytes:  64,
+			InputTokens:  total / 2,
+			OutputTokens: total - total/2,
+			TotalTokens:  total,
+			Subagents:    datatypes.JSONSlice[atypes.DeviceScanPromptSubagent](subagents),
+			ToolCalls: datatypes.JSONSlice[atypes.DeviceScanPromptToolCall]{
+				{Name: "Read", Count: 3},
+				{Name: "Bash", Count: 1},
+			},
+		}
+	}
+
+	scan := insertScan(t, c, types.DeviceScan{
+		SubmittedBy: "alice", DeviceID: "device-a", ScannedAt: now,
+		TopPrompts: []types.DeviceScanPrompt{
+			mkPrompt("chunk-low", 100, now.Add(-3*time.Minute)),
+			mkPrompt("chunk-high", 900, now.Add(-2*time.Minute), atypes.DeviceScanPromptSubagent{
+				SubagentType: "Explore",
+				Description:  "code search",
+				Metrics: atypes.DeviceScanPromptMetrics{
+					InputTokens: 100, OutputTokens: 50, TotalTokens: 150,
+				},
+				MainSessionImpact: atypes.DeviceScanPromptSubagentImpact{
+					CallTokens: 20, ResultTokens: 30, TotalTokens: 50,
+				},
+				ToolCalls: []atypes.DeviceScanPromptToolCall{{Name: "Grep", Count: 5}},
+			}),
+			mkPrompt("chunk-mid", 500, now.Add(-1*time.Minute)),
+		},
+	})
+
+	rows, total, err := c.ListScanPrompts(ctx, scan.ID, 10)
+	if err != nil {
+		t.Fatalf("list prompts: %v", err)
+	}
+	if total != 3 || len(rows) != 3 {
+		t.Fatalf("want 3 prompts, got total=%d len=%d", total, len(rows))
+	}
+	wantOrder := []string{"chunk-high", "chunk-mid", "chunk-low"}
+	for i, w := range wantOrder {
+		if rows[i].ChunkID != w {
+			t.Errorf("order[%d]: want %q, got %q (totals=%d)", i, w, rows[i].ChunkID, rows[i].TotalTokens)
+		}
+	}
+
+	rows, _, err = c.ListScanPrompts(ctx, scan.ID, 2)
+	if err != nil {
+		t.Fatalf("list limit=2: %v", err)
+	}
+	if len(rows) != 2 || rows[0].ChunkID != "chunk-high" || rows[1].ChunkID != "chunk-mid" {
+		t.Errorf("limit=2: got %+v", rows)
+	}
+
+	got, err := c.GetScanPrompt(ctx, scan.ID, "chunk-high")
+	if err != nil {
+		t.Fatalf("get prompt: %v", err)
+	}
+	if got.TotalTokens != 900 || got.Client != "claude_code" || len(got.ToolCalls) != 2 {
+		t.Errorf("chunk-high payload: tokens=%d client=%q tool_calls=%d", got.TotalTokens, got.Client, len(got.ToolCalls))
+	}
+	if len(got.Subagents) != 1 || got.Subagents[0].SubagentType != "Explore" || got.Subagents[0].MainSessionImpact.TotalTokens != 50 {
+		t.Errorf("chunk-high subagents: %+v", got.Subagents)
+	}
+	if len(got.Subagents[0].ToolCalls) != 1 || got.Subagents[0].ToolCalls[0].Name != "Grep" {
+		t.Errorf("subagent tool calls round-trip: %+v", got.Subagents[0].ToolCalls)
+	}
+
+	if _, err := c.GetScanPrompt(ctx, scan.ID, "missing"); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Errorf("missing chunk: want ErrRecordNotFound, got %v", err)
 	}
 }

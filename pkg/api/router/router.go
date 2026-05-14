@@ -804,6 +804,8 @@ func Router(ctx context.Context, services *services.Services) (http.Handler, err
 	mux.HandleFunc("GET /api/devices/scans", deviceScans.List)
 	mux.HandleFunc("GET /api/devices/scans/{scan_id}", deviceScans.Get)
 	mux.HandleFunc("DELETE /api/devices/scans/{scan_id}", deviceScans.Delete)
+	mux.HandleFunc("GET /api/devices/scans/{scan_id}/prompts", deviceScans.ListPrompts)
+	mux.HandleFunc("GET /api/devices/scans/{scan_id}/prompts/{chunk_id}", deviceScans.GetPrompt)
 	mux.HandleFunc("GET /api/devices/scan-stats", deviceScans.GetScanStats)
 	mux.HandleFunc("GET /api/devices/mcp-servers/{config_hash}", deviceScans.GetMCPServerDetail)
 	mux.HandleFunc("GET /api/devices/mcp-servers/{config_hash}/occurrences", deviceScans.ListMCPServerOccurrences)

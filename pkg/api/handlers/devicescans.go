@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/hex"
 	"errors"
 	"net/url"
 	"strconv"
@@ -12,6 +13,20 @@ import (
 	gateway "github.com/obot-platform/obot/pkg/gateway/client"
 	gtypes "github.com/obot-platform/obot/pkg/gateway/types"
 	"gorm.io/gorm"
+)
+
+// promptScannerClients is the allow-list of accepted DeviceScanPrompt.Client
+// values. New client scanners (codex, cursor, opencode, …) become a one-line
+// change here.
+var promptScannerClients = map[string]struct{}{
+	"claude_code": {},
+}
+
+const (
+	maxTopPrompts        = 10
+	maxPromptTextBytes   = 2048
+	maxSubagentTreeDepth = 5
+	promptHashHexLen     = 64
 )
 
 // dashboardWindowDefault is the default rolling window applied to GetScanStats.
@@ -31,6 +46,9 @@ func (*DeviceScansHandler) Submit(req api.Context) error {
 	if err := req.Read(&manifest); err != nil {
 		return err
 	}
+	if err := validateTopPrompts(manifest.TopPrompts); err != nil {
+		return err
+	}
 
 	scan := gtypes.DeviceScanFromManifest(manifest)
 	scan.SubmittedBy = req.User.GetUID()
@@ -40,6 +58,115 @@ func (*DeviceScansHandler) Submit(req api.Context) error {
 	}
 
 	return req.WriteCreated(gtypes.ConvertDeviceScan(scan))
+}
+
+// validateTopPrompts enforces the DESIGN.md ingest rules on submitted
+// prompt rows. Any violation returns a 400 — the whole scan is
+// rejected so partial-submission states can't sneak in.
+func validateTopPrompts(prompts []types.DeviceScanPrompt) error {
+	if len(prompts) == 0 {
+		return nil
+	}
+	if len(prompts) > maxTopPrompts {
+		return types.NewErrBadRequest("topPrompts: at most %d entries allowed, got %d", maxTopPrompts, len(prompts))
+	}
+	for i, p := range prompts {
+		if _, ok := promptScannerClients[p.Client]; !ok {
+			return types.NewErrBadRequest("topPrompts[%d]: unsupported client %q", i, p.Client)
+		}
+		if l := len(p.PromptText); l == 0 || l > maxPromptTextBytes {
+			return types.NewErrBadRequest("topPrompts[%d]: promptText length %d outside (0, %d]", i, l, maxPromptTextBytes)
+		}
+		if !isHexString(p.PromptHash, promptHashHexLen) {
+			return types.NewErrBadRequest("topPrompts[%d]: promptHash must be %d hex chars", i, promptHashHexLen)
+		}
+		if got, want := p.Metrics.TotalTokens, p.Metrics.InputTokens+p.Metrics.OutputTokens; got != want {
+			return types.NewErrBadRequest("topPrompts[%d]: metrics.totalTokens (%d) != inputTokens+outputTokens (%d)", i, got, want)
+		}
+		if err := validateSubagentDepth(p.Subagents, 1, maxSubagentTreeDepth); err != nil {
+			return types.NewErrBadRequest("topPrompts[%d]: %v", i, err)
+		}
+	}
+	return nil
+}
+
+func isHexString(s string, n int) bool {
+	if len(s) != n {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
+}
+
+func validateSubagentDepth(nodes []types.DeviceScanPromptSubagent, depth, maxDepth int) error {
+	if len(nodes) == 0 {
+		return nil
+	}
+	if depth > maxDepth {
+		return errors.New("subagent tree depth exceeds 5")
+	}
+	for _, n := range nodes {
+		if err := validateSubagentDepth(n.Subagents, depth+1, maxDepth); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListPrompts handles GET /api/devices/scans/{scan_id}/prompts. Returns
+// prompts for the scan ordered by total_tokens DESC. Honors an optional
+// `limit` query parameter (default 10, max maxTopPrompts).
+func (*DeviceScansHandler) ListPrompts(req api.Context) error {
+	id, err := parseDeviceScanID(req.PathValue("scan_id"))
+	if err != nil {
+		return err
+	}
+	limit := maxTopPrompts
+	if v := req.URL.Query().Get("limit"); v != "" {
+		l, err := strconv.Atoi(v)
+		if err != nil || l < 1 {
+			return types.NewErrBadRequest("invalid limit: %q", v)
+		}
+		if l > maxTopPrompts {
+			l = maxTopPrompts
+		}
+		limit = l
+	}
+
+	rows, total, err := req.GatewayClient.ListScanPrompts(req.Context(), id, limit)
+	if err != nil {
+		return err
+	}
+	items := make([]types.DeviceScanPrompt, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, gtypes.ConvertDeviceScanPrompt(r))
+	}
+	return req.Write(types.DeviceScanPromptResponse{
+		DeviceScanPromptList: types.DeviceScanPromptList{Items: items},
+		Total:                total,
+		Limit:                limit,
+	})
+}
+
+// GetPrompt handles GET /api/devices/scans/{scan_id}/prompts/{chunk_id}.
+// Returns a single prompt row with its full subagent tree.
+func (*DeviceScansHandler) GetPrompt(req api.Context) error {
+	id, err := parseDeviceScanID(req.PathValue("scan_id"))
+	if err != nil {
+		return err
+	}
+	chunkID := req.PathValue("chunk_id")
+	if chunkID == "" {
+		return types.NewErrBadRequest("missing chunk_id")
+	}
+	row, err := req.GatewayClient.GetScanPrompt(req.Context(), id, chunkID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return types.NewErrNotFound("prompt %q not found in scan %d", chunkID, id)
+		}
+		return err
+	}
+	return req.Write(gtypes.ConvertDeviceScanPrompt(*row))
 }
 
 // List handles GET /api/devices/scans. Optional submitted_by / device_id

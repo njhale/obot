@@ -74,6 +74,13 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanMCPServer":                                schema_obot_platform_obot_apiclient_types_DeviceScanMCPServer(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanManifest":                                 schema_obot_platform_obot_apiclient_types_DeviceScanManifest(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanPlugin":                                   schema_obot_platform_obot_apiclient_types_DeviceScanPlugin(ref),
+		"github.com/obot-platform/obot/apiclient/types.DeviceScanPrompt":                                   schema_obot_platform_obot_apiclient_types_DeviceScanPrompt(ref),
+		"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptList":                               schema_obot_platform_obot_apiclient_types_DeviceScanPromptList(ref),
+		"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptMetrics":                            schema_obot_platform_obot_apiclient_types_DeviceScanPromptMetrics(ref),
+		"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptResponse":                           schema_obot_platform_obot_apiclient_types_DeviceScanPromptResponse(ref),
+		"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptSubagent":                           schema_obot_platform_obot_apiclient_types_DeviceScanPromptSubagent(ref),
+		"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptSubagentImpact":                     schema_obot_platform_obot_apiclient_types_DeviceScanPromptSubagentImpact(ref),
+		"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptToolCall":                           schema_obot_platform_obot_apiclient_types_DeviceScanPromptToolCall(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanResponse":                                 schema_obot_platform_obot_apiclient_types_DeviceScanResponse(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanSkill":                                    schema_obot_platform_obot_apiclient_types_DeviceScanSkill(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanStats":                                    schema_obot_platform_obot_apiclient_types_DeviceScanStats(ref),
@@ -3456,6 +3463,20 @@ func schema_obot_platform_obot_apiclient_types_DeviceScan(ref common.ReferenceCa
 							},
 						},
 					},
+					"topPrompts": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TopPrompts is populated when --include-top-prompts is set on `obot scan`. Capped at 10 entries by server validation; sorted by metrics.totalTokens descending on submission.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPrompt"),
+									},
+								},
+							},
+						},
+					},
 					"id": {
 						SchemaProps: spec.SchemaProps{
 							Description: "ID is the server-assigned primary key.",
@@ -3483,7 +3504,7 @@ func schema_obot_platform_obot_apiclient_types_DeviceScan(ref common.ReferenceCa
 			},
 		},
 		Dependencies: []string{
-			"github.com/obot-platform/obot/apiclient/types.DeviceScanClient", "github.com/obot-platform/obot/apiclient/types.DeviceScanFile", "github.com/obot-platform/obot/apiclient/types.DeviceScanMCPServer", "github.com/obot-platform/obot/apiclient/types.DeviceScanPlugin", "github.com/obot-platform/obot/apiclient/types.DeviceScanSkill", "github.com/obot-platform/obot/apiclient/types.Time"},
+			"github.com/obot-platform/obot/apiclient/types.DeviceScanClient", "github.com/obot-platform/obot/apiclient/types.DeviceScanFile", "github.com/obot-platform/obot/apiclient/types.DeviceScanMCPServer", "github.com/obot-platform/obot/apiclient/types.DeviceScanPlugin", "github.com/obot-platform/obot/apiclient/types.DeviceScanPrompt", "github.com/obot-platform/obot/apiclient/types.DeviceScanSkill", "github.com/obot-platform/obot/apiclient/types.Time"},
 	}
 }
 
@@ -3889,12 +3910,26 @@ func schema_obot_platform_obot_apiclient_types_DeviceScanManifest(ref common.Ref
 							},
 						},
 					},
+					"topPrompts": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TopPrompts is populated when --include-top-prompts is set on `obot scan`. Capped at 10 entries by server validation; sorted by metrics.totalTokens descending on submission.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPrompt"),
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"scannerVersion", "scannedAt", "deviceID", "hostname", "os", "arch", "files", "mcpServers", "skills", "plugins", "clients"},
 			},
 		},
 		Dependencies: []string{
-			"github.com/obot-platform/obot/apiclient/types.DeviceScanClient", "github.com/obot-platform/obot/apiclient/types.DeviceScanFile", "github.com/obot-platform/obot/apiclient/types.DeviceScanMCPServer", "github.com/obot-platform/obot/apiclient/types.DeviceScanPlugin", "github.com/obot-platform/obot/apiclient/types.DeviceScanSkill", "github.com/obot-platform/obot/apiclient/types.Time"},
+			"github.com/obot-platform/obot/apiclient/types.DeviceScanClient", "github.com/obot-platform/obot/apiclient/types.DeviceScanFile", "github.com/obot-platform/obot/apiclient/types.DeviceScanMCPServer", "github.com/obot-platform/obot/apiclient/types.DeviceScanPlugin", "github.com/obot-platform/obot/apiclient/types.DeviceScanPrompt", "github.com/obot-platform/obot/apiclient/types.DeviceScanSkill", "github.com/obot-platform/obot/apiclient/types.Time"},
 	}
 }
 
@@ -4043,6 +4078,432 @@ func schema_obot_platform_obot_apiclient_types_DeviceScanPlugin(ref common.Refer
 					},
 				},
 				Required: []string{"client", "name", "pluginType", "files", "enabled", "hasMCPServers", "hasSkills", "hasRules", "hasCommands", "hasHooks"},
+			},
+		},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_DeviceScanPrompt(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DeviceScanPrompt is one captured top-level user prompt with rolled-up token usage and tool/subagent activity. Attached to a DeviceScan.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"id": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ID is the row's primary key. Server-set; ignored on submission.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"deviceScanID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DeviceScanID is the parent scan's primary key. Server-set.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"client": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Client is the canonical client identifier (e.g. \"claude_code\").",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"sessionID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SessionID is the source-session UUID this prompt was extracted from.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"chunkID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ChunkID is a stable per-prompt identifier; unique within a scan.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"model": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Model is the assistant model recorded on the first assistant turn.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"startedAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StartedAt is when the user turn began.",
+							Ref:         ref("github.com/obot-platform/obot/apiclient/types.Time"),
+						},
+					},
+					"endedAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "EndedAt is when the prompt's last assistant turn completed.",
+							Ref:         ref("github.com/obot-platform/obot/apiclient/types.Time"),
+						},
+					},
+					"durationMs": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DurationMs is EndedAt - StartedAt in milliseconds.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"cwd": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Cwd is the working directory recorded on the user entry.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"gitBranch": {
+						SchemaProps: spec.SchemaProps{
+							Description: "GitBranch is the active git branch recorded on the user entry.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"promptText": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PromptText is the truncated user prompt (≤2048 bytes, UTF-8 safe).",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"promptHash": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PromptHash is the SHA-256 (64 hex chars) of the full untruncated prompt.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"promptBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PromptBytes is the full untruncated prompt length in bytes.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"metrics": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Metrics are the transitive token totals for the prompt (parent session + every nested subagent).",
+							Default:     map[string]interface{}{},
+							Ref:         ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPromptMetrics"),
+						},
+					},
+					"mainMetrics": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MainMetrics is the parent-session-only token totals (subagent internal usage excluded). Lets the UI show \"parent context cost\" vs \"actual cost including subagents\" without re-summing.",
+							Default:     map[string]interface{}{},
+							Ref:         ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPromptMetrics"),
+						},
+					},
+					"toolCalls": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ToolCalls aggregates the parent session's tool_use blocks as {name, count}, sorted by count desc. Tool calls a subagent performed internally live on the subagent node, not here.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPromptToolCall"),
+									},
+								},
+							},
+						},
+					},
+					"subagents": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Subagents is the recursive subagent tree rooted at this prompt. Server-enforced depth cap is 5.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPromptSubagent"),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"client", "sessionID", "chunkID", "startedAt", "endedAt", "durationMs", "promptHash", "promptBytes", "metrics", "mainMetrics"},
+			},
+		},
+		Dependencies: []string{
+			"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptMetrics", "github.com/obot-platform/obot/apiclient/types.DeviceScanPromptSubagent", "github.com/obot-platform/obot/apiclient/types.DeviceScanPromptToolCall", "github.com/obot-platform/obot/apiclient/types.Time"},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_DeviceScanPromptList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPrompt"),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			"github.com/obot-platform/obot/apiclient/types.DeviceScanPrompt"},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_DeviceScanPromptMetrics(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DeviceScanPromptMetrics is the 4-component token breakdown plus the derived TotalTokens used for ranking. Matches claude-devtools' SessionMetrics shape.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"inputTokens": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int64",
+						},
+					},
+					"outputTokens": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int64",
+						},
+					},
+					"cacheReadTokens": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int64",
+						},
+					},
+					"cacheCreationTokens": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int64",
+						},
+					},
+					"totalTokens": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TotalTokens is the ranking metric. Equal to InputTokens + OutputTokens.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+				Required: []string{"inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens"},
+			},
+		},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_DeviceScanPromptResponse(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DeviceScanPromptResponse is returned by GET /api/devices/scans/{id}/prompts.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPrompt"),
+									},
+								},
+							},
+						},
+					},
+					"total": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int64",
+						},
+					},
+					"limit": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int32",
+						},
+					},
+					"offset": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int32",
+						},
+					},
+				},
+				Required: []string{"items", "total", "limit", "offset"},
+			},
+		},
+		Dependencies: []string{
+			"github.com/obot-platform/obot/apiclient/types.DeviceScanPrompt"},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_DeviceScanPromptSubagent(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DeviceScanPromptSubagent is one node in a prompt's recursive subagent tree. CLI caps depth at 5; deeper nodes are folded into their level-5 ancestor's Metrics.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"subagentType": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SubagentType is the subagent's declared type (free-form string).",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"description": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Description is the subagent's declared description.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metrics": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Metrics is this node's internal token totals, transitively summed over its own descendants.",
+							Default:     map[string]interface{}{},
+							Ref:         ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPromptMetrics"),
+						},
+					},
+					"mainSessionImpact": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MainSessionImpact is the token cost the direct parent paid to invoke this subagent (Task tool_use input + tool_result output).",
+							Default:     map[string]interface{}{},
+							Ref:         ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPromptSubagentImpact"),
+						},
+					},
+					"toolCalls": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ToolCalls aggregates this subagent's own tool_use blocks as {name, count}. Precomputed at scan time because the server never receives the subagent transcript.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPromptToolCall"),
+									},
+								},
+							},
+						},
+					},
+					"subagents": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Subagents are the children this subagent spawned via the Task tool. Recursive; depth capped at 5 across the whole tree.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPromptSubagent"),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"metrics", "mainSessionImpact"},
+			},
+		},
+		Dependencies: []string{
+			"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptMetrics", "github.com/obot-platform/obot/apiclient/types.DeviceScanPromptSubagent", "github.com/obot-platform/obot/apiclient/types.DeviceScanPromptSubagentImpact", "github.com/obot-platform/obot/apiclient/types.DeviceScanPromptToolCall"},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_DeviceScanPromptSubagentImpact(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DeviceScanPromptSubagentImpact is the parent-context cost of invoking a subagent — what the direct parent paid in input/output tokens for the Task call and its result.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"callTokens": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CallTokens is the Task tool_use's input_tokens.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"resultTokens": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ResultTokens is the Task tool_result's output_tokens.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"totalTokens": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TotalTokens is CallTokens + ResultTokens.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+				Required: []string{"callTokens", "resultTokens", "totalTokens"},
+			},
+		},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_DeviceScanPromptToolCall(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DeviceScanPromptToolCall is one row of the tool-name aggregate.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"count": {
+						SchemaProps: spec.SchemaProps{
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int32",
+						},
+					},
+				},
+				Required: []string{"name", "count"},
 			},
 		},
 	}
