@@ -83,7 +83,9 @@ import type {
 	DeviceSkillStatResponse,
 	DeviceClientFleetSummary,
 	DeviceClientFleetSummaryResponse,
-	DeviceClientListFilters
+	DeviceClientListFilters,
+	DeviceScanPrompt,
+	DeviceScanPromptResponse
 } from './types';
 import { MCPCompositeDeletionDependencyError } from './types';
 
@@ -1920,6 +1922,41 @@ export async function listDeviceSkillOccurrences(
 		`/devices/skills/${encodeURIComponent(name)}/occurrences${queryString ? `?${queryString}` : ''}`,
 		opts
 	)) as DeviceSkillOccurrenceResponse;
+}
+
+export async function getDevicePromptsLatest(
+	deviceID: string,
+	page?: { limit?: number },
+	opts?: { fetch?: Fetcher }
+): Promise<DeviceScanPromptResponse> {
+	const queryString = buildQueryString(page ?? {});
+	return (await doGet(
+		`/devices/latest-prompts/${encodeURIComponent(deviceID)}${queryString ? `?${queryString}` : ''}`,
+		opts
+	)) as DeviceScanPromptResponse;
+}
+
+export async function getScanPrompts(
+	scanID: number | string,
+	page?: { limit?: number; offset?: number },
+	opts?: { fetch?: Fetcher }
+): Promise<DeviceScanPromptResponse> {
+	const queryString = buildQueryString(page ?? {});
+	return (await doGet(
+		`/devices/scans/${scanID}/prompts${queryString ? `?${queryString}` : ''}`,
+		opts
+	)) as DeviceScanPromptResponse;
+}
+
+export async function getScanPrompt(
+	scanID: number | string,
+	chunkID: string,
+	opts?: { fetch?: Fetcher }
+): Promise<DeviceScanPrompt> {
+	return (await doGet(
+		`/devices/scans/${scanID}/prompts/${encodeURIComponent(chunkID)}`,
+		opts
+	)) as DeviceScanPrompt;
 }
 
 export async function restartNanobotAgentDeployments(opts?: {

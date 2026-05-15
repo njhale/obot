@@ -1,15 +1,17 @@
 import { handleRouteError } from '$lib/errors';
 import { AdminService } from '$lib/services';
-import type { DeviceScanResponse } from '$lib/services/admin/types';
+import type { DeviceScanPrompt, DeviceScanResponse } from '$lib/services/admin/types';
 import { profile } from '$lib/stores';
 import type { PageLoad } from './$types';
 
 const PAGE_SIZE = 50;
+const PROMPT_LIMIT = 10;
 
 export const load: PageLoad = async ({ params, fetch }) => {
 	const { device_id } = params;
 
 	let scans: DeviceScanResponse = { items: [], total: 0, limit: PAGE_SIZE, offset: 0 };
+	let topPrompts: DeviceScanPrompt[] = [];
 	try {
 		scans = await AdminService.listDeviceScans(
 			{
@@ -19,7 +21,17 @@ export const load: PageLoad = async ({ params, fetch }) => {
 			},
 			{ fetch }
 		);
-		return { scans, deviceId: device_id, pageSize: PAGE_SIZE };
+		try {
+			const promptsResp = await AdminService.getDevicePromptsLatest(
+				device_id,
+				{ limit: PROMPT_LIMIT },
+				{ fetch }
+			);
+			topPrompts = promptsResp.items ?? [];
+		} catch {
+			topPrompts = [];
+		}
+		return { scans, deviceId: device_id, pageSize: PAGE_SIZE, topPrompts };
 	} catch (err) {
 		handleRouteError(err, `/admin/devices/${device_id}`, profile.current);
 	}

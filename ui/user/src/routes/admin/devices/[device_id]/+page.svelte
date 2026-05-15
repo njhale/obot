@@ -4,6 +4,7 @@
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import DotDotDot from '$lib/components/DotDotDot.svelte';
 	import Layout from '$lib/components/Layout.svelte';
+	import TopPromptsTable from '$lib/components/admin/device-scan/TopPromptsTable.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import { PAGE_TRANSITION_DURATION } from '$lib/constants';
 	import {
@@ -12,16 +13,26 @@
 		type DeviceScanClient,
 		type DeviceScanMCPServer,
 		type DeviceScanPlugin,
+		type DeviceScanPrompt,
 		type DeviceScanSkill,
 		type OrgUser
 	} from '$lib/services';
 	import { formatTimeAgo } from '$lib/time';
 	import { goto } from '$lib/url';
 	import { openUrl } from '$lib/utils';
-	import { Boxes, Cpu, Ellipsis, MonitorCheck, PencilRuler, Scale, Server } from 'lucide-svelte';
+	import {
+		Boxes,
+		Cpu,
+		Ellipsis,
+		MessageSquare,
+		MonitorCheck,
+		PencilRuler,
+		Scale,
+		Server
+	} from 'lucide-svelte';
 	import { fly } from 'svelte/transition';
 
-	type Tab = 'mcp' | 'skills' | 'plugins' | 'clients';
+	type Tab = 'mcp' | 'skills' | 'plugins' | 'clients' | 'prompts';
 
 	const PAGE_SIZE = 50;
 
@@ -29,6 +40,7 @@
 	let scans = $derived<DeviceScan[]>(data?.scans?.items ?? []);
 	let deviceId = $derived(data?.deviceId ?? '');
 	let latest = $derived<DeviceScan | undefined>(scans[0]);
+	let topPrompts = $derived<DeviceScanPrompt[]>(data?.topPrompts ?? []);
 
 	let activeTab = $state<Tab>('mcp');
 
@@ -298,6 +310,14 @@
 						<MonitorCheck class="size-4" /> Clients
 						<span class="text-on-surface1">({clients.length})</span>
 					</button>
+					<button
+						class="tab-button"
+						class:tab-active={activeTab === 'prompts'}
+						onclick={() => (activeTab = 'prompts')}
+					>
+						<MessageSquare class="size-4" /> Top Prompts
+						<span class="text-on-surface1">({topPrompts.length})</span>
+					</button>
 				</div>
 
 				{#if activeTab === 'mcp'}
@@ -503,6 +523,21 @@
 								{/if}
 							{/snippet}
 						</Table>
+					{/if}
+				{:else if activeTab === 'prompts'}
+					{#if topPrompts.length === 0}
+						<div class="text-on-surface1 flex flex-col gap-1 p-4 text-sm font-light">
+							<div class="flex items-center gap-2">
+								<MessageSquare class="size-4 opacity-50" />
+								<span>No top prompts captured for this device.</span>
+							</div>
+							<p class="text-xs">
+								Top prompts are opt-in. Re-run <code class="font-mono">obot scan</code> with
+								<code class="font-mono">--include-top-prompts 10</code> on the device to capture them.
+							</p>
+						</div>
+					{:else}
+						<TopPromptsTable prompts={topPrompts} {deviceId} />
 					{/if}
 				{/if}
 			</div>

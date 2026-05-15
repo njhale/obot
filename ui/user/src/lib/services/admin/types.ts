@@ -1205,6 +1205,66 @@ export interface DeviceScan {
 	skills: DeviceScanSkill[];
 	plugins: DeviceScanPlugin[];
 	clients: DeviceScanClient[];
+	topPrompts?: DeviceScanPrompt[];
+}
+
+export interface DeviceScanPromptMetrics {
+	inputTokens: number;
+	outputTokens: number;
+	cacheReadTokens: number;
+	cacheCreationTokens: number;
+	totalTokens: number;
+}
+
+export interface DeviceScanPromptToolCall {
+	name: string;
+	count: number;
+}
+
+export interface DeviceScanPromptSubagentImpact {
+	callTokens: number;
+	resultTokens: number;
+	totalTokens: number;
+}
+
+export interface DeviceScanPromptSubagent {
+	subagentType?: string;
+	description?: string;
+	metrics: DeviceScanPromptMetrics;
+	mainSessionImpact: DeviceScanPromptSubagentImpact;
+	toolCalls?: DeviceScanPromptToolCall[];
+	subagents?: DeviceScanPromptSubagent[];
+}
+
+export interface DeviceScanPrompt {
+	id?: number;
+	deviceScanID?: number;
+	client: string;
+	sessionID: string;
+	chunkID: string;
+	model?: string;
+	startedAt: string;
+	endedAt: string;
+	durationMs: number;
+	cwd?: string;
+	gitBranch?: string;
+	promptText?: string;
+	promptHash: string;
+	promptBytes: number;
+	metrics: DeviceScanPromptMetrics;
+	mainMetrics: DeviceScanPromptMetrics;
+	toolCalls?: DeviceScanPromptToolCall[];
+	subagents?: DeviceScanPromptSubagent[];
+}
+
+export interface DeviceScanPromptList {
+	items: DeviceScanPrompt[] | null;
+}
+
+export interface DeviceScanPromptResponse extends DeviceScanPromptList {
+	total: number;
+	limit: number;
+	offset: number;
 }
 
 export interface DeviceScanList {
