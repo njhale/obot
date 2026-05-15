@@ -444,6 +444,84 @@ type DeviceScanPrompt struct {
 	// Subagents is the recursive subagent tree rooted at this prompt.
 	// Server-enforced depth cap is 5.
 	Subagents []DeviceScanPromptSubagent `json:"subagents,omitempty"`
+	// Steps is the ordered timeline of user / thinking / text / tool_use
+	// / tool_result / subagent_call entries that make up this prompt's
+	// turn. Populated when --include-top-prompts is set. Capped at 2000
+	// entries per prompt by server validation.
+	Steps []DeviceScanPromptStep `json:"steps,omitempty"`
+}
+
+// DeviceScanPromptStep is one ordered timeline entry inside a prompt
+// (one block of an assistant message, a user input, a tool call, a
+// tool result, or a synthetic subagent_call marker). The list of steps
+// reproduces the shape of the turn for the admin drilldown without
+// shipping full transcripts: every text-bearing step carries a
+// truncated head, the SHA-256 hash of the full content, and the full
+// content's byte length.
+type DeviceScanPromptStep struct {
+	// Kind identifies what the step represents. One of: "user",
+	// "thinking", "text", "tool_use", "tool_result", "subagent_call".
+	Kind string `json:"kind"`
+	// Context is "main" for steps in the parent session and "subagent"
+	// for steps that originate inside a spawned subagent.
+	Context string `json:"context"`
+	// SubagentID matches DeviceScanPromptSubagent.SubagentID when the
+	// step belongs to a subagent's own transcript; empty for main-
+	// context steps. For a synthetic subagent_call step (kind ==
+	// "subagent_call") this points at the spawned subagent's node.
+	SubagentID string `json:"subagentID,omitempty"`
+	// StartedAt is when this step began, taken from the underlying
+	// JSONL entry's timestamp.
+	StartedAt Time `json:"startedAt"`
+	// DurationMs is the step's wall-clock duration when computable;
+	// 0 otherwise.
+	DurationMs int64 `json:"durationMs,omitempty"`
+	// ToolUseID is the upstream tool_use block id (populated on
+	// kind == "tool_use" and kind == "subagent_call").
+	ToolUseID string `json:"toolUseID,omitempty"`
+	// ToolName is the tool name (populated on kind == "tool_use").
+	ToolName string `json:"toolName,omitempty"`
+	// ToolInputKeys are the top-level keys of the tool's input object.
+	// Values are deliberately not shipped — same redaction pattern as
+	// EnvKeys on DeviceScanMCPServer.
+	ToolInputKeys []string `json:"toolInputKeys,omitempty"`
+	// ToolUseRef links a tool_result step back to its originating
+	// tool_use step's ToolUseID. Empty when the upstream link cannot
+	// be resolved.
+	ToolUseRef string `json:"toolUseRef,omitempty"`
+	// IsError is true when a tool_result step represents a failed
+	// tool execution.
+	IsError bool `json:"isError,omitempty"`
+	// TextHead is the truncated, UTF-8 safe head of the step's
+	// text-bearing content (≤512 bytes). Populated for user /
+	// thinking / text / tool_result steps and for the subagent_call
+	// step's description.
+	TextHead string `json:"textHead,omitempty"`
+	// TextBytes is the full untruncated content length in bytes.
+	TextBytes int64 `json:"textBytes,omitempty"`
+	// TextHash is the SHA-256 (64 hex chars) of the full untruncated
+	// content. Empty when the step has no text content (tool_use,
+	// some subagent_call steps) or when the head is a synthetic
+	// placeholder (e.g. image blocks).
+	TextHash string `json:"textHash,omitempty"`
+	// Tokens are the per-step token attribution derived from the
+	// owning assistant turn's usage.
+	Tokens DeviceScanPromptStepTokens `json:"tokens"`
+	// AccumulatedContextTokens is the running sum of
+	// Input + CacheRead + CacheCreation across the step's context
+	// (main timeline vs. a single subagent timeline) up to and
+	// including this step.
+	AccumulatedContextTokens int64 `json:"accumulatedContextTokens,omitempty"`
+}
+
+// DeviceScanPromptStepTokens is the per-step 4-component token
+// breakdown. Same field semantics as DeviceScanPromptMetrics minus
+// the derived TotalTokens.
+type DeviceScanPromptStepTokens struct {
+	Input         int64 `json:"input,omitempty"`
+	Output        int64 `json:"output,omitempty"`
+	CacheRead     int64 `json:"cacheRead,omitempty"`
+	CacheCreation int64 `json:"cacheCreation,omitempty"`
 }
 
 // DeviceScanPromptMetrics is the 4-component token breakdown plus the
@@ -468,6 +546,10 @@ type DeviceScanPromptToolCall struct {
 // subagent tree. CLI caps depth at 5; deeper nodes are folded into
 // their level-5 ancestor's Metrics.
 type DeviceScanPromptSubagent struct {
+	// SubagentID is the stable, scan-local identifier for this node.
+	// Empty on legacy M1 rows; populated by M2 CLIs so step entries
+	// can reference the node via DeviceScanPromptStep.SubagentID.
+	SubagentID string `json:"subagentID,omitempty"`
 	// SubagentType is the subagent's declared type (free-form string).
 	SubagentType string `json:"subagentType,omitempty"`
 	// Description is the subagent's declared description.

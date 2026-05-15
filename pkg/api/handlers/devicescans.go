@@ -9,11 +9,14 @@ import (
 	"time"
 
 	types "github.com/obot-platform/obot/apiclient/types"
+	"github.com/obot-platform/obot/logger"
 	"github.com/obot-platform/obot/pkg/api"
 	gateway "github.com/obot-platform/obot/pkg/gateway/client"
 	gtypes "github.com/obot-platform/obot/pkg/gateway/types"
 	"gorm.io/gorm"
 )
+
+var devicescanLog = logger.Package()
 
 // promptScannerClients is the allow-list of accepted DeviceScanPrompt.Client
 // values. New client scanners (codex, cursor, opencode, …) become a one-line
@@ -27,6 +30,25 @@ const (
 	maxPromptTextBytes   = 2048
 	maxSubagentTreeDepth = 5
 	promptHashHexLen     = 64
+	maxPromptSteps       = 2000
+	maxStepTextHeadBytes = 512
+)
+
+// allowedStepKinds and allowedStepContexts enforce the M2 wire enum
+// surface. Kept as maps so additions are a one-line change.
+var (
+	allowedStepKinds = map[string]struct{}{
+		"user":          {},
+		"thinking":      {},
+		"text":          {},
+		"tool_use":      {},
+		"tool_result":   {},
+		"subagent_call": {},
+	}
+	allowedStepContexts = map[string]struct{}{
+		"main":     {},
+		"subagent": {},
+	}
 )
 
 // dashboardWindowDefault is the default rolling window applied to GetScanStats.
@@ -62,7 +84,12 @@ func (*DeviceScansHandler) Submit(req api.Context) error {
 
 // validateTopPrompts enforces the DESIGN.md ingest rules on submitted
 // prompt rows. Any violation returns a 400 — the whole scan is
-// rejected so partial-submission states can't sneak in.
+// rejected so partial-submission states can't sneak in. The one
+// exception is a tool_result step whose ToolUseRef can't be resolved
+// to an earlier tool_use in the same prompt: that single step is
+// dropped with a warning rather than failing the whole submission,
+// since CLI extractors will occasionally emit results whose upstream
+// blocks were truncated upstream.
 func validateTopPrompts(prompts []types.DeviceScanPrompt) error {
 	if len(prompts) == 0 {
 		return nil
@@ -70,7 +97,8 @@ func validateTopPrompts(prompts []types.DeviceScanPrompt) error {
 	if len(prompts) > maxTopPrompts {
 		return types.NewErrBadRequest("topPrompts: at most %d entries allowed, got %d", maxTopPrompts, len(prompts))
 	}
-	for i, p := range prompts {
+	for i := range prompts {
+		p := &prompts[i]
 		if _, ok := promptScannerClients[p.Client]; !ok {
 			return types.NewErrBadRequest("topPrompts[%d]: unsupported client %q", i, p.Client)
 		}
@@ -86,8 +114,138 @@ func validateTopPrompts(prompts []types.DeviceScanPrompt) error {
 		if err := validateSubagentDepth(p.Subagents, 1, maxSubagentTreeDepth); err != nil {
 			return types.NewErrBadRequest("topPrompts[%d]: %v", i, err)
 		}
+		if err := validateAndFilterSteps(p, i); err != nil {
+			return err
+		}
+		reconcileMainMetrics(p)
 	}
 	return nil
+}
+
+// reconcileMainMetrics logs a warning when the prompt's MainMetrics
+// rollup drifts by >1% from the sum of its main-context step tokens.
+// The rollup stays authoritative (the step list is for the drilldown,
+// not for ranking) — this is "warn-and-fix" by way of an operator
+// signal, not by mutation.
+func reconcileMainMetrics(p *types.DeviceScanPrompt) {
+	if len(p.Steps) == 0 {
+		return
+	}
+	var stepIn, stepOut, stepCR, stepCC int64
+	for _, s := range p.Steps {
+		if s.Context != "main" {
+			continue
+		}
+		stepIn += s.Tokens.Input
+		stepOut += s.Tokens.Output
+		stepCR += s.Tokens.CacheRead
+		stepCC += s.Tokens.CacheCreation
+	}
+	if drifts(p.MainMetrics.InputTokens, stepIn) ||
+		drifts(p.MainMetrics.OutputTokens, stepOut) ||
+		drifts(p.MainMetrics.CacheReadTokens, stepCR) ||
+		drifts(p.MainMetrics.CacheCreationTokens, stepCC) {
+		devicescanLog.Warnf("prompt %s mainMetrics drifts from step totals (rollup keeps authority): rollup={in:%d out:%d cr:%d cc:%d} steps={in:%d out:%d cr:%d cc:%d}",
+			p.ChunkID,
+			p.MainMetrics.InputTokens, p.MainMetrics.OutputTokens, p.MainMetrics.CacheReadTokens, p.MainMetrics.CacheCreationTokens,
+			stepIn, stepOut, stepCR, stepCC)
+	}
+}
+
+// drifts returns true when step-derived `got` differs from the
+// authoritative rollup `want` by more than 1% (with an absolute floor
+// of 1 so a rollup of 0 vs steps of 0 never trips). Used only to log
+// reconciliation warnings — it does not affect persisted data.
+func drifts(want, got int64) bool {
+	if want == got {
+		return false
+	}
+	diff := want - got
+	if diff < 0 {
+		diff = -diff
+	}
+	abs := want
+	if abs < 0 {
+		abs = -abs
+	}
+	tolerance := max(abs/100, 1)
+	return diff > tolerance
+}
+
+// validateAndFilterSteps enforces the M2 step-list rules on a single
+// prompt. SubagentID / kind / context / size violations are hard 400
+// errors. tool_result steps whose ToolUseRef does not match any
+// earlier tool_use in the same prompt are dropped in place with a
+// warning — the rest of the prompt is preserved.
+func validateAndFilterSteps(p *types.DeviceScanPrompt, idx int) error {
+	if len(p.Steps) == 0 {
+		return nil
+	}
+	if len(p.Steps) > maxPromptSteps {
+		return types.NewErrBadRequest("topPrompts[%d]: steps length %d exceeds max %d", idx, len(p.Steps), maxPromptSteps)
+	}
+
+	subagentIDs := collectSubagentIDs(p.Subagents)
+	seenToolUseIDs := make(map[string]struct{})
+	kept := p.Steps[:0]
+	for j, s := range p.Steps {
+		if _, ok := allowedStepKinds[s.Kind]; !ok {
+			return types.NewErrBadRequest("topPrompts[%d].steps[%d]: invalid kind %q", idx, j, s.Kind)
+		}
+		if _, ok := allowedStepContexts[s.Context]; !ok {
+			return types.NewErrBadRequest("topPrompts[%d].steps[%d]: invalid context %q", idx, j, s.Context)
+		}
+		if len(s.TextHead) > maxStepTextHeadBytes {
+			return types.NewErrBadRequest("topPrompts[%d].steps[%d]: textHead %d > %d bytes", idx, j, len(s.TextHead), maxStepTextHeadBytes)
+		}
+		if s.TextHash != "" && !isHexString(s.TextHash, promptHashHexLen) {
+			return types.NewErrBadRequest("topPrompts[%d].steps[%d]: textHash must be empty or %d hex chars", idx, j, promptHashHexLen)
+		}
+		if s.Tokens.Input < 0 || s.Tokens.Output < 0 || s.Tokens.CacheRead < 0 || s.Tokens.CacheCreation < 0 {
+			return types.NewErrBadRequest("topPrompts[%d].steps[%d]: negative token counters", idx, j)
+		}
+		if s.TextBytes < 0 || s.DurationMs < 0 || s.AccumulatedContextTokens < 0 {
+			return types.NewErrBadRequest("topPrompts[%d].steps[%d]: negative byte / duration / accumulated counter", idx, j)
+		}
+		if s.Context == "subagent" {
+			if s.SubagentID == "" {
+				return types.NewErrBadRequest("topPrompts[%d].steps[%d]: subagent context requires subagentID", idx, j)
+			}
+			if _, ok := subagentIDs[s.SubagentID]; !ok {
+				return types.NewErrBadRequest("topPrompts[%d].steps[%d]: subagentID %q not found in subagent tree", idx, j, s.SubagentID)
+			}
+		}
+		if s.Kind == "tool_use" && s.ToolUseID != "" {
+			seenToolUseIDs[s.ToolUseID] = struct{}{}
+		}
+		if s.Kind == "tool_result" && s.ToolUseRef != "" {
+			if _, ok := seenToolUseIDs[s.ToolUseRef]; !ok {
+				devicescanLog.Warnf("dropping tool_result step %d on prompt %s: unresolved toolUseRef %q", j, p.ChunkID, s.ToolUseRef)
+				continue
+			}
+		}
+		kept = append(kept, s)
+	}
+	p.Steps = kept
+	return nil
+}
+
+// collectSubagentIDs walks the recursive subagent tree and returns
+// every non-empty SubagentID as a set, so step validation can confirm
+// each subagent-context step references a real tree node.
+func collectSubagentIDs(nodes []types.DeviceScanPromptSubagent) map[string]struct{} {
+	out := make(map[string]struct{})
+	var walk func([]types.DeviceScanPromptSubagent)
+	walk = func(ns []types.DeviceScanPromptSubagent) {
+		for _, n := range ns {
+			if n.SubagentID != "" {
+				out[n.SubagentID] = struct{}{}
+			}
+			walk(n.Subagents)
+		}
+	}
+	walk(nodes)
+	return out
 }
 
 func isHexString(s string, n int) bool {

@@ -40,15 +40,19 @@ func TestDeviceScanPromptsEndToEnd(t *testing.T) {
 		Username:       "alice",
 		TopPrompts: []types.DeviceScanPrompt{
 			makeTestPrompt("chunk-low", 100, now.Add(-3*time.Minute)),
-			makeTestPrompt("chunk-high", 900, now.Add(-2*time.Minute), types.DeviceScanPromptSubagent{
-				SubagentType: "Explore",
-				Description:  "code search",
-				Metrics:      types.DeviceScanPromptMetrics{InputTokens: 100, OutputTokens: 50, TotalTokens: 150},
-				MainSessionImpact: types.DeviceScanPromptSubagentImpact{
-					CallTokens: 20, ResultTokens: 30, TotalTokens: 50,
-				},
-				ToolCalls: []types.DeviceScanPromptToolCall{{Name: "Grep", Count: 5}},
-			}),
+			withSteps(
+				makeTestPrompt("chunk-high", 900, now.Add(-2*time.Minute), types.DeviceScanPromptSubagent{
+					SubagentID:   "sa-1",
+					SubagentType: "Explore",
+					Description:  "code search",
+					Metrics:      types.DeviceScanPromptMetrics{InputTokens: 100, OutputTokens: 50, TotalTokens: 150},
+					MainSessionImpact: types.DeviceScanPromptSubagentImpact{
+						CallTokens: 20, ResultTokens: 30, TotalTokens: 50,
+					},
+					ToolCalls: []types.DeviceScanPromptToolCall{{Name: "Grep", Count: 5}},
+				}),
+				now.Add(-2*time.Minute),
+			),
 			makeTestPrompt("chunk-mid", 500, now.Add(-1*time.Minute)),
 		},
 	}
@@ -98,9 +102,18 @@ func TestDeviceScanPromptsEndToEnd(t *testing.T) {
 	if len(prompt.Subagents) != 1 || prompt.Subagents[0].SubagentType != "Explore" {
 		t.Errorf("get prompt: subagents not preserved: %+v", prompt.Subagents)
 	}
+	if prompt.Subagents[0].SubagentID != "sa-1" {
+		t.Errorf("get prompt: subagent ID lost: %q", prompt.Subagents[0].SubagentID)
+	}
 	if len(prompt.Subagents[0].ToolCalls) != 1 || prompt.Subagents[0].ToolCalls[0].Name != "Grep" {
 		t.Errorf("get prompt: subagent tool calls dropped: %+v", prompt.Subagents[0].ToolCalls)
 	}
+	assertExpectedSteps(t, "get prompt", prompt.Steps)
+
+	// (2b) The list endpoint and latest-prompts endpoint must also
+	// hydrate the full Steps payload — the drilldown UI reads from
+	// these too. Find chunk-high in each response and assert.
+	assertExpectedSteps(t, "list prompts", findPrompt(list.Items, "chunk-high").Steps)
 
 	// (2a) Missing chunk returns 404.
 	missing := callHandler(t, h.GetPrompt, gw, "alice", "GET",
@@ -123,6 +136,12 @@ func TestDeviceScanPromptsEndToEnd(t *testing.T) {
 			t.Errorf("latest order[%d]: want %q, got %q", i, w, latest.Items[i].ChunkID)
 		}
 	}
+	assertExpectedSteps(t, "latest prompts", findPrompt(latest.Items, "chunk-high").Steps)
+
+	// (3c) The full /scans/{id} GET also returns embedded Steps so the
+	// scan-detail view shares one source of truth with the drilldown.
+	scan := doGetScan(t, h, gw, created.ID)
+	assertExpectedSteps(t, "get scan", findPrompt(scan.TopPrompts, "chunk-high").Steps)
 
 	// (3a) A newer scan with NO prompts must NOT bury the prompt scan —
 	// "latest scan that has any prompts" wins.
@@ -161,6 +180,57 @@ func TestDeviceScanPromptsEndToEnd(t *testing.T) {
 	if afterDelete.Total != 0 || len(afterDelete.Items) != 0 {
 		t.Errorf("latest after delete: want empty, got total=%d len=%d", afterDelete.Total, len(afterDelete.Items))
 	}
+}
+
+// withSteps attaches a deterministic M2 timeline to a test prompt:
+// user → tool_use (Read) → tool_result → subagent_call → thinking
+// (subagent context). Used by the integration test to verify that
+// every Steps entry round-trips through Submit and all GET endpoints.
+func withSteps(p types.DeviceScanPrompt, started time.Time) types.DeviceScanPrompt {
+	subagentID := ""
+	if len(p.Subagents) > 0 {
+		subagentID = p.Subagents[0].SubagentID
+	}
+	p.Steps = []types.DeviceScanPromptStep{
+		{
+			Kind: "user", Context: "main",
+			StartedAt: *types.NewTime(started),
+			TextHead:  "do the thing", TextBytes: 12,
+			TextHash: "1111111111111111111111111111111111111111111111111111111111111111",
+			Tokens:   types.DeviceScanPromptStepTokens{Input: 100},
+		},
+		{
+			Kind: "tool_use", Context: "main",
+			StartedAt:     *types.NewTime(started.Add(100 * time.Millisecond)),
+			ToolUseID:     "tu-1",
+			ToolName:      "Read",
+			ToolInputKeys: []string{"file_path"},
+			Tokens:        types.DeviceScanPromptStepTokens{Output: 20},
+		},
+		{
+			Kind: "tool_result", Context: "main",
+			StartedAt:  *types.NewTime(started.Add(200 * time.Millisecond)),
+			ToolUseRef: "tu-1",
+			TextHead:   "file contents", TextBytes: 13,
+			TextHash: "2222222222222222222222222222222222222222222222222222222222222222",
+		},
+		{
+			Kind: "subagent_call", Context: "main",
+			StartedAt:  *types.NewTime(started.Add(300 * time.Millisecond)),
+			ToolUseID:  "tu-2",
+			SubagentID: subagentID,
+			TextHead:   "code search",
+		},
+		{
+			Kind: "thinking", Context: "subagent",
+			StartedAt:  *types.NewTime(started.Add(400 * time.Millisecond)),
+			SubagentID: subagentID,
+			TextHead:   "thinking about grep patterns", TextBytes: 28,
+			TextHash: "3333333333333333333333333333333333333333333333333333333333333333",
+			Tokens:   types.DeviceScanPromptStepTokens{Input: 80, Output: 30},
+		},
+	}
+	return p
 }
 
 func makeTestPrompt(chunkID string, total int64, started time.Time, subagents ...types.DeviceScanPromptSubagent) types.DeviceScanPrompt {
@@ -294,6 +364,58 @@ func doGetLatest(t *testing.T, h *DeviceScansHandler, gw *gclient.Client, device
 		t.Fatalf("get latest: unmarshal: %v", err)
 	}
 	return out
+}
+
+func doGetScan(t *testing.T, h *DeviceScansHandler, gw *gclient.Client, scanID uint) types.DeviceScan {
+	t.Helper()
+	rec := callHandler(t, h.Get, gw, "alice", "GET",
+		fmt.Sprintf("/api/devices/scans/%d", scanID),
+		map[string]string{"scan_id": strconv.FormatUint(uint64(scanID), 10)}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get scan: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var out types.DeviceScan
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("get scan: unmarshal: %v", err)
+	}
+	return out
+}
+
+func findPrompt(items []types.DeviceScanPrompt, chunkID string) types.DeviceScanPrompt {
+	for _, p := range items {
+		if p.ChunkID == chunkID {
+			return p
+		}
+	}
+	return types.DeviceScanPrompt{}
+}
+
+// assertExpectedSteps confirms that the canonical chunk-high prompt
+// round-trips its full Steps payload through whichever endpoint the
+// caller is exercising. Pinned to the shape produced by withSteps.
+func assertExpectedSteps(t *testing.T, where string, steps []types.DeviceScanPromptStep) {
+	t.Helper()
+	if got := len(steps); got != 5 {
+		t.Fatalf("%s: steps len: want 5, got %d (%+v)", where, got, steps)
+	}
+	wantKinds := []string{"user", "tool_use", "tool_result", "subagent_call", "thinking"}
+	for i, want := range wantKinds {
+		if steps[i].Kind != want {
+			t.Errorf("%s: steps[%d].kind: want %q, got %q", where, i, want, steps[i].Kind)
+		}
+	}
+	if steps[1].ToolName != "Read" || len(steps[1].ToolInputKeys) != 1 || steps[1].ToolInputKeys[0] != "file_path" {
+		t.Errorf("%s: tool_use payload not preserved: %+v", where, steps[1])
+	}
+	if steps[2].ToolUseRef != "tu-1" {
+		t.Errorf("%s: tool_result link not preserved: %+v", where, steps[2])
+	}
+	if steps[3].SubagentID != "sa-1" || steps[4].SubagentID != "sa-1" {
+		t.Errorf("%s: subagent IDs not preserved: %+v / %+v", where, steps[3], steps[4])
+	}
+	if steps[4].Context != "subagent" {
+		t.Errorf("%s: subagent step context lost: %+v", where, steps[4])
+	}
 }
 
 // Ensure the gateway client's ConvertDeviceScan path is the canonical

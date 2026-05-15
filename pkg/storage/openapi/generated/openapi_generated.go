@@ -78,6 +78,8 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptList":                               schema_obot_platform_obot_apiclient_types_DeviceScanPromptList(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptMetrics":                            schema_obot_platform_obot_apiclient_types_DeviceScanPromptMetrics(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptResponse":                           schema_obot_platform_obot_apiclient_types_DeviceScanPromptResponse(ref),
+		"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptStep":                               schema_obot_platform_obot_apiclient_types_DeviceScanPromptStep(ref),
+		"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptStepTokens":                         schema_obot_platform_obot_apiclient_types_DeviceScanPromptStepTokens(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptSubagent":                           schema_obot_platform_obot_apiclient_types_DeviceScanPromptSubagent(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptSubagentImpact":                     schema_obot_platform_obot_apiclient_types_DeviceScanPromptSubagentImpact(ref),
 		"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptToolCall":                           schema_obot_platform_obot_apiclient_types_DeviceScanPromptToolCall(ref),
@@ -4234,12 +4236,26 @@ func schema_obot_platform_obot_apiclient_types_DeviceScanPrompt(ref common.Refer
 							},
 						},
 					},
+					"steps": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Steps is the ordered timeline of user / thinking / text / tool_use / tool_result / subagent_call entries that make up this prompt's turn. Populated when --include-top-prompts is set. Capped at 2000 entries per prompt by server validation.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPromptStep"),
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"client", "sessionID", "chunkID", "startedAt", "endedAt", "durationMs", "promptHash", "promptBytes", "metrics", "mainMetrics"},
 			},
 		},
 		Dependencies: []string{
-			"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptMetrics", "github.com/obot-platform/obot/apiclient/types.DeviceScanPromptSubagent", "github.com/obot-platform/obot/apiclient/types.DeviceScanPromptToolCall", "github.com/obot-platform/obot/apiclient/types.Time"},
+			"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptMetrics", "github.com/obot-platform/obot/apiclient/types.DeviceScanPromptStep", "github.com/obot-platform/obot/apiclient/types.DeviceScanPromptSubagent", "github.com/obot-platform/obot/apiclient/types.DeviceScanPromptToolCall", "github.com/obot-platform/obot/apiclient/types.Time"},
 	}
 }
 
@@ -4371,6 +4387,173 @@ func schema_obot_platform_obot_apiclient_types_DeviceScanPromptResponse(ref comm
 	}
 }
 
+func schema_obot_platform_obot_apiclient_types_DeviceScanPromptStep(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DeviceScanPromptStep is one ordered timeline entry inside a prompt (one block of an assistant message, a user input, a tool call, a tool result, or a synthetic subagent_call marker). The list of steps reproduces the shape of the turn for the admin drilldown without shipping full transcripts: every text-bearing step carries a truncated head, the SHA-256 hash of the full content, and the full content's byte length.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind identifies what the step represents. One of: \"user\", \"thinking\", \"text\", \"tool_use\", \"tool_result\", \"subagent_call\".",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"context": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Context is \"main\" for steps in the parent session and \"subagent\" for steps that originate inside a spawned subagent.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"subagentID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SubagentID matches DeviceScanPromptSubagent.SubagentID when the step belongs to a subagent's own transcript; empty for main- context steps. For a synthetic subagent_call step (kind == \"subagent_call\") this points at the spawned subagent's node.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"startedAt": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StartedAt is when this step began, taken from the underlying JSONL entry's timestamp.",
+							Ref:         ref("github.com/obot-platform/obot/apiclient/types.Time"),
+						},
+					},
+					"durationMs": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DurationMs is the step's wall-clock duration when computable; 0 otherwise.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"toolUseID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ToolUseID is the upstream tool_use block id (populated on kind == \"tool_use\" and kind == \"subagent_call\").",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"toolName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ToolName is the tool name (populated on kind == \"tool_use\").",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"toolInputKeys": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ToolInputKeys are the top-level keys of the tool's input object. Values are deliberately not shipped — same redaction pattern as EnvKeys on DeviceScanMCPServer.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"toolUseRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ToolUseRef links a tool_result step back to its originating tool_use step's ToolUseID. Empty when the upstream link cannot be resolved.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"isError": {
+						SchemaProps: spec.SchemaProps{
+							Description: "IsError is true when a tool_result step represents a failed tool execution.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"textHead": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TextHead is the truncated, UTF-8 safe head of the step's text-bearing content (≤512 bytes). Populated for user / thinking / text / tool_result steps and for the subagent_call step's description.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"textBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TextBytes is the full untruncated content length in bytes.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"textHash": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TextHash is the SHA-256 (64 hex chars) of the full untruncated content. Empty when the step has no text content (tool_use, some subagent_call steps) or when the head is a synthetic placeholder (e.g. image blocks).",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"tokens": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Tokens are the per-step token attribution derived from the owning assistant turn's usage.",
+							Default:     map[string]interface{}{},
+							Ref:         ref("github.com/obot-platform/obot/apiclient/types.DeviceScanPromptStepTokens"),
+						},
+					},
+					"accumulatedContextTokens": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AccumulatedContextTokens is the running sum of Input + CacheRead + CacheCreation across the step's context (main timeline vs. a single subagent timeline) up to and including this step.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+				Required: []string{"kind", "context", "startedAt", "tokens"},
+			},
+		},
+		Dependencies: []string{
+			"github.com/obot-platform/obot/apiclient/types.DeviceScanPromptStepTokens", "github.com/obot-platform/obot/apiclient/types.Time"},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_DeviceScanPromptStepTokens(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "DeviceScanPromptStepTokens is the per-step 4-component token breakdown. Same field semantics as DeviceScanPromptMetrics minus the derived TotalTokens.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"input": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int64",
+						},
+					},
+					"output": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int64",
+						},
+					},
+					"cacheRead": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int64",
+						},
+					},
+					"cacheCreation": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"integer"},
+							Format: "int64",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func schema_obot_platform_obot_apiclient_types_DeviceScanPromptSubagent(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -4378,6 +4561,13 @@ func schema_obot_platform_obot_apiclient_types_DeviceScanPromptSubagent(ref comm
 				Description: "DeviceScanPromptSubagent is one node in a prompt's recursive subagent tree. CLI caps depth at 5; deeper nodes are folded into their level-5 ancestor's Metrics.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
+					"subagentID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SubagentID is the stable, scan-local identifier for this node. Empty on legacy M1 rows; populated by M2 CLIs so step entries can reference the node via DeviceScanPromptStep.SubagentID.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"subagentType": {
 						SchemaProps: spec.SchemaProps{
 							Description: "SubagentType is the subagent's declared type (free-form string).",

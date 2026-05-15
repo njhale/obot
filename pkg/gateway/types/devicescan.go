@@ -151,6 +151,10 @@ type DeviceScanPrompt struct {
 
 	ToolCalls datatypes.JSONSlice[types2.DeviceScanPromptToolCall] `json:"toolCalls"`
 	Subagents datatypes.JSONSlice[types2.DeviceScanPromptSubagent] `json:"subagents"`
+	// Steps is the per-prompt timeline (M2). Persisted as a single
+	// JSONB blob — we never query per-step in M2, only the whole list
+	// loaded for the drilldown. Nullable so M1 rows continue to work.
+	Steps datatypes.JSONSlice[types2.DeviceScanPromptStep] `json:"steps"`
 }
 
 type DeviceScanFile struct {
@@ -251,6 +255,7 @@ func ConvertDeviceScanPrompt(p DeviceScanPrompt) types2.DeviceScanPrompt {
 		},
 		ToolCalls: []types2.DeviceScanPromptToolCall(p.ToolCalls),
 		Subagents: []types2.DeviceScanPromptSubagent(p.Subagents),
+		Steps:     []types2.DeviceScanPromptStep(p.Steps),
 	}
 }
 
@@ -541,6 +546,7 @@ func DeviceScanFromManifest(p types2.DeviceScanManifest) DeviceScan {
 				MainTotalTokens:         pr.MainMetrics.TotalTokens,
 				ToolCalls:               datatypes.JSONSlice[types2.DeviceScanPromptToolCall](pr.ToolCalls),
 				Subagents:               datatypes.JSONSlice[types2.DeviceScanPromptSubagent](pr.Subagents),
+				Steps:                   datatypes.JSONSlice[types2.DeviceScanPromptStep](pr.Steps),
 			}
 		}
 	}
