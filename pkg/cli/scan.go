@@ -41,7 +41,7 @@ type Scan struct {
 	DryRun            bool   `usage:"Print the scan payload to stdout without submitting it" env:"OBOT_SCAN_DRY_RUN"`
 	Timeout           int    `usage:"Number of seconds to wait for the scan to complete" default:"60" env:"OBOT_SCAN_TIMEOUT"`
 	MaxDepth          int    `usage:"Maximum path depth (in segments below $HOME) to match when crawling for project-scope configs and skills; e.g. 5 matches files up to $HOME/a/b/c/d/e" default:"5" env:"OBOT_SCAN_MAX_DEPTH"`
-	IncludeTopPrompts int    `usage:"Opt-in: extract and upload the top N (1..10) highest token-usage prompts from local AI client session logs over the last 30 days. When set, the truncated prompt text (≤2 KiB) and a SHA-256 of the full text are included alongside aggregate metrics. 0 disables (default)." default:"0" env:"OBOT_SCAN_INCLUDE_TOP_PROMPTS"`
+	IncludeTopPrompts int    `usage:"Opt-in: extract and upload the top N (1..10) highest token-usage prompts from local AI client session logs over the last 30 days. When set, the truncated prompt text (≤2 KiB) and a SHA-256 of the full untruncated text are included alongside aggregate metrics; tool inputs/outputs, thinking blocks, and assistant text are NEVER uploaded. Run with --dry-run first to inspect the exact payload before submitting. 0 disables (default)." default:"0" env:"OBOT_SCAN_INCLUDE_TOP_PROMPTS"`
 
 	root *Obot
 }

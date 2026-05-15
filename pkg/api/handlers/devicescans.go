@@ -121,19 +121,42 @@ func (*DeviceScansHandler) ListPrompts(req api.Context) error {
 	if err != nil {
 		return err
 	}
-	limit := maxTopPrompts
-	if v := req.URL.Query().Get("limit"); v != "" {
-		l, err := strconv.Atoi(v)
-		if err != nil || l < 1 {
-			return types.NewErrBadRequest("invalid limit: %q", v)
-		}
-		if l > maxTopPrompts {
-			l = maxTopPrompts
-		}
-		limit = l
+	limit, err := parsePromptLimit(req.URL.Query().Get("limit"))
+	if err != nil {
+		return err
 	}
 
 	rows, total, err := req.GatewayClient.ListScanPrompts(req.Context(), id, limit)
+	if err != nil {
+		return err
+	}
+	items := make([]types.DeviceScanPrompt, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, gtypes.ConvertDeviceScanPrompt(r))
+	}
+	return req.Write(types.DeviceScanPromptResponse{
+		DeviceScanPromptList: types.DeviceScanPromptList{Items: items},
+		Total:                total,
+		Limit:                limit,
+	})
+}
+
+// GetLatestDevicePrompts handles GET /api/devices/latest-prompts/{device_id}.
+// Returns top prompts from the device's most recent scan that has any
+// prompts. Empty list when the device has never submitted prompts —
+// callers render the opt-in explainer in that case. The route uses a
+// distinct second-segment literal ("latest-prompts") so it does not
+// collide with the existing `/api/devices/scans/` authz subtree.
+func (*DeviceScansHandler) GetLatestDevicePrompts(req api.Context) error {
+	deviceID := req.PathValue("device_id")
+	if deviceID == "" {
+		return types.NewErrBadRequest("missing device_id")
+	}
+	limit, err := parsePromptLimit(req.URL.Query().Get("limit"))
+	if err != nil {
+		return err
+	}
+	_, rows, total, err := req.GatewayClient.GetLatestDevicePrompts(req.Context(), deviceID, limit)
 	if err != nil {
 		return err
 	}
@@ -219,6 +242,24 @@ func (*DeviceScansHandler) Delete(req api.Context) error {
 		return err
 	}
 	return req.GatewayClient.DeleteDeviceScan(req.Context(), id)
+}
+
+// parsePromptLimit parses the `limit` query param shared by the
+// per-scan and latest-device prompt endpoints. Empty defaults to
+// maxTopPrompts; out-of-range values cap at maxTopPrompts so callers
+// never see more than the server-enforced upload cap.
+func parsePromptLimit(raw string) (int, error) {
+	if raw == "" {
+		return maxTopPrompts, nil
+	}
+	l, err := strconv.Atoi(raw)
+	if err != nil || l < 1 {
+		return 0, types.NewErrBadRequest("invalid limit: %q", raw)
+	}
+	if l > maxTopPrompts {
+		l = maxTopPrompts
+	}
+	return l, nil
 }
 
 func parseDeviceScanID(raw string) (uint, error) {

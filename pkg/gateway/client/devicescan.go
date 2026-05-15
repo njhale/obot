@@ -67,6 +67,39 @@ func (c *Client) ListScanPrompts(ctx context.Context, scanID uint, limit int) ([
 	return rows, total, nil
 }
 
+// GetLatestDevicePrompts returns the top prompts from the most recent
+// scan for deviceID that submitted any prompts. The returned scanID is
+// the parent scan id; rows are ordered by total_tokens DESC, ended_at
+// DESC. Returns (0, nil, 0, nil) — not an error — when the device has
+// no scans with prompts, so the dashboard's empty state stays trivial.
+// limit 0 means no cap (subject to the parent scan's <=10 prompt limit).
+func (c *Client) GetLatestDevicePrompts(ctx context.Context, deviceID string, limit int) (uint, []types.DeviceScanPrompt, int64, error) {
+	if deviceID == "" {
+		return 0, nil, 0, errors.New("empty device id")
+	}
+	db := c.db.WithContext(ctx)
+
+	var holder struct {
+		MaxID *uint `gorm:"column:max_id"`
+	}
+	if err := db.Table("device_scans AS s").
+		Joins("JOIN device_scan_prompts AS p ON p.device_scan_id = s.id").
+		Where("s.device_id = ?", deviceID).
+		Select("MAX(s.id) AS max_id").
+		Scan(&holder).Error; err != nil {
+		return 0, nil, 0, fmt.Errorf("find latest device scan with prompts: %w", err)
+	}
+	if holder.MaxID == nil {
+		return 0, nil, 0, nil
+	}
+
+	rows, total, err := c.ListScanPrompts(ctx, *holder.MaxID, limit)
+	if err != nil {
+		return 0, nil, 0, err
+	}
+	return *holder.MaxID, rows, total, nil
+}
+
 // GetScanPrompt loads a single prompt row by its (scan, chunkID).
 // Returns gorm.ErrRecordNotFound when no such row exists.
 func (c *Client) GetScanPrompt(ctx context.Context, scanID uint, chunkID string) (*types.DeviceScanPrompt, error) {
