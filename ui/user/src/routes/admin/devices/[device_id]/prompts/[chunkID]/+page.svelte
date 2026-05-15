@@ -3,7 +3,7 @@
 	import { tooltip } from '$lib/actions/tooltip.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import Layout from '$lib/components/Layout.svelte';
-	import SubagentNode from '$lib/components/admin/device-scan/SubagentNode.svelte';
+	import Timeline from '$lib/components/admin/device-scan/timeline/Timeline.svelte';
 	import { PAGE_TRANSITION_DURATION } from '$lib/constants';
 	import { formatNumber } from '$lib/format';
 	import type { DeviceScanPrompt, DeviceScanPromptMetrics } from '$lib/services/admin/types';
@@ -36,11 +36,6 @@
 	let subagentExtra = $derived<number>(
 		prompt ? Math.max(0, prompt.metrics.totalTokens - prompt.mainMetrics.totalTokens) : 0
 	);
-
-	let toolRows = $derived(
-		(prompt?.toolCalls ?? []).slice().sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
-	);
-	let subagents = $derived(prompt?.subagents ?? []);
 </script>
 
 <Layout>
@@ -108,7 +103,7 @@
 				</div>
 			</div>
 
-			<!-- Metrics -->
+			<!-- Tokens -->
 			<div class="dark:bg-surface2 bg-background flex flex-col gap-3 rounded-md p-4 shadow-sm">
 				<div class="flex items-baseline gap-3">
 					<h3 class="text-sm font-semibold">Tokens</h3>
@@ -138,47 +133,9 @@
 				</p>
 			</div>
 
-			<!-- Tool calls -->
+			<!-- Timeline -->
 			<div class="dark:bg-surface2 bg-background flex flex-col gap-2 rounded-md p-4 shadow-sm">
-				<h3 class="text-sm font-semibold">Tool calls · parent session</h3>
-				{#if toolRows.length === 0}
-					<p class="text-on-surface1 text-xs font-light">
-						No tool calls recorded on the parent session.
-					</p>
-				{:else}
-					<table class="w-full text-sm">
-						<thead class="text-on-surface1 text-left text-xs">
-							<tr>
-								<th class="py-1 pr-2 font-normal">Name</th>
-								<th class="py-1 pr-2 text-right font-normal">Count</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each toolRows as t (t.name)}
-								<tr class="border-surface1 dark:border-surface3 border-t">
-									<td class="py-1 pr-2 font-mono text-xs">{t.name}</td>
-									<td class="py-1 pr-2 text-right font-mono text-xs">{t.count}</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				{/if}
-			</div>
-
-			<!-- Subagents -->
-			<div class="flex flex-col gap-2">
-				<h3 class="text-sm font-semibold">
-					Subagents{subagents.length > 0 ? ` · ${subagents.length}` : ''}
-				</h3>
-				{#if subagents.length === 0}
-					<p class="text-on-surface1 text-xs font-light">No subagents invoked from this prompt.</p>
-				{:else}
-					<div class="flex flex-col gap-2">
-						{#each subagents as child, i (i)}
-							<SubagentNode node={child} />
-						{/each}
-					</div>
-				{/if}
+				<Timeline {prompt} />
 			</div>
 		{/if}
 	</div>

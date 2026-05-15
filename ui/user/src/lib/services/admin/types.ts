@@ -1228,12 +1228,48 @@ export interface DeviceScanPromptSubagentImpact {
 }
 
 export interface DeviceScanPromptSubagent {
+	subagentID?: string;
 	subagentType?: string;
 	description?: string;
 	metrics: DeviceScanPromptMetrics;
 	mainSessionImpact: DeviceScanPromptSubagentImpact;
 	toolCalls?: DeviceScanPromptToolCall[];
 	subagents?: DeviceScanPromptSubagent[];
+}
+
+export type DeviceScanPromptStepKind =
+	| 'user'
+	| 'thinking'
+	| 'text'
+	| 'tool_use'
+	| 'tool_result'
+	| 'subagent_call';
+
+export type DeviceScanPromptStepContext = 'main' | 'subagent';
+
+export interface DeviceScanPromptStepTokens {
+	input?: number;
+	output?: number;
+	cacheRead?: number;
+	cacheCreation?: number;
+}
+
+export interface DeviceScanPromptStep {
+	kind: DeviceScanPromptStepKind;
+	context: DeviceScanPromptStepContext;
+	subagentID?: string;
+	startedAt: string;
+	durationMs?: number;
+	toolUseID?: string;
+	toolName?: string;
+	toolInputKeys?: string[];
+	toolUseRef?: string;
+	isError?: boolean;
+	textHead?: string;
+	textBytes?: number;
+	textHash?: string;
+	tokens: DeviceScanPromptStepTokens;
+	accumulatedContextTokens?: number;
 }
 
 export interface DeviceScanPrompt {
@@ -1255,6 +1291,7 @@ export interface DeviceScanPrompt {
 	mainMetrics: DeviceScanPromptMetrics;
 	toolCalls?: DeviceScanPromptToolCall[];
 	subagents?: DeviceScanPromptSubagent[];
+	steps?: DeviceScanPromptStep[];
 }
 
 export interface DeviceScanPromptList {
