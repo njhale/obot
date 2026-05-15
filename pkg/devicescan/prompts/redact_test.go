@@ -91,6 +91,42 @@ func TestTruncatePromptText_StableHash(t *testing.T) {
 	}
 }
 
+func TestTruncateContent_RespectsCallerCap(t *testing.T) {
+	// 512-byte cap is the step-head cap. A 600-byte input should be
+	// truncated and end with the marker, never exceeding the cap.
+	in := strings.Repeat("a", 600)
+	got, full, _ := TruncateContent(in, MaxStepHeadBytes)
+	if full != 600 {
+		t.Errorf("fullBytes: got %d want 600", full)
+	}
+	if len(got) > MaxStepHeadBytes {
+		t.Errorf("got %d bytes, cap %d", len(got), MaxStepHeadBytes)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("missing truncation marker")
+	}
+}
+
+func TestTruncateContent_ShortInputUnchangedAtSmallCap(t *testing.T) {
+	in := "hi"
+	got, full, _ := TruncateContent(in, MaxStepHeadBytes)
+	if got != in {
+		t.Errorf("short input mutated: got %q", got)
+	}
+	if full != int64(len(in)) {
+		t.Errorf("fullBytes: got %d", full)
+	}
+}
+
+func TestTruncateContent_DifferentCapsSameHash(t *testing.T) {
+	in := strings.Repeat("z", 4096)
+	_, _, h1 := TruncateContent(in, MaxPromptTextBytes)
+	_, _, h2 := TruncateContent(in, MaxStepHeadBytes)
+	if h1 != h2 {
+		t.Errorf("hash should not depend on cap: %q vs %q", h1, h2)
+	}
+}
+
 func TestTruncatePromptText_EmptyInput(t *testing.T) {
 	got, full, hash := TruncatePromptText("")
 	if got != "" {

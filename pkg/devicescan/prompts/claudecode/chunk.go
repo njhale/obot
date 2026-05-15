@@ -48,6 +48,12 @@ type chunk struct {
 	// resolver uses this to attribute subagent files to specific Task
 	// calls; mirrors claude-devtools' linkToTaskCalls phase-1 logic.
 	AgentToTask map[string]string
+
+	// steps emits the main-context timeline as entries stream through.
+	// Finalized into Steps + Bridges on finalizeChunk.
+	steps   *stepBuilder
+	Steps   []types.DeviceScanPromptStep
+	Bridges []taskBridge
 }
 
 // chunkSession parses one main-session JSONL file from fsys and emits
@@ -73,6 +79,7 @@ func chunkSession(fsys fs.FS, sessionFile, sessionID string) ([]*chunk, error) {
 		if text, ok := isRealUserChunkStart(e); ok {
 			finalizeChunk(current, lastTS)
 			current = newChunk(sessionFile, sessionID, e, text)
+			current.steps.addUser(e, text)
 			chunks = append(chunks, current)
 			if !e.Timestamp.IsZero() {
 				lastTS = e.Timestamp
@@ -126,6 +133,7 @@ func newChunk(sessionFile, sessionID string, e entry, text string) *chunk {
 		ToolCalls:   newToolCallCounter(),
 		TasksByID:   map[string]*taskInvocation{},
 		AgentToTask: map[string]string{},
+		steps:       newStepBuilder("main", ""),
 	}
 }
 
@@ -170,6 +178,9 @@ func absorbAssistant(c *chunk, e entry) {
 			c.TasksByID[b.ID] = t
 		}
 	}
+	if c.steps != nil {
+		c.steps.addAssistant(e)
+	}
 }
 
 // absorbUserFlow handles "internal" user entries — tool_results that
@@ -210,6 +221,9 @@ func absorbUserFlow(c *chunk, e entry) {
 			t.ResultTokens += estimateTokens(len(b.Content))
 		}
 	}
+	if c.steps != nil {
+		c.steps.addToolResult(e)
+	}
 }
 
 func finalizeChunk(c *chunk, lastTS time.Time) {
@@ -220,6 +234,11 @@ func finalizeChunk(c *chunk, lastTS time.Time) {
 		c.EndedAt = lastTS
 	}
 	sealMetrics(&c.MainMetrics)
+	if c.steps != nil {
+		c.Steps = c.steps.out
+		c.Bridges = c.steps.bridges
+		c.steps = nil
+	}
 }
 
 // jsonString plucks a top-level string field from a JSON object

@@ -1,0 +1,62 @@
+[
+  {
+    "kind": "user",
+    "context": "main",
+    "startedAt": "2026-05-10T10:00:00Z",
+    "textHead": "Read foo.txt and summarize it.",
+    "textBytes": 30,
+    "textHash": "e33ee86aa441b3ade9d77cbb183a552202c3dd1272828b27574844b5274cb73a",
+    "tokens": {}
+  },
+  {
+    "kind": "text",
+    "context": "main",
+    "startedAt": "2026-05-10T10:00:01Z",
+    "textHead": "I'll read the file.",
+    "textBytes": 19,
+    "textHash": "d82a7e9d8c37fabdbc53da64d40e52bb940b11123bd59c3ca062d5e2706de227",
+    "tokens": {
+      "input": 100,
+      "output": 11
+    },
+    "accumulatedContextTokens": 100
+  },
+  {
+    "kind": "tool_use",
+    "context": "main",
+    "startedAt": "2026-05-10T10:00:01Z",
+    "toolUseID": "t1",
+    "toolName": "Read",
+    "toolInputKeys": [
+      "path"
+    ],
+    "tokens": {
+      "output": 9
+    },
+    "accumulatedContextTokens": 100
+  },
+  {
+    "kind": "tool_result",
+    "context": "main",
+    "startedAt": "2026-05-10T10:00:02Z",
+    "toolUseRef": "t1",
+    "textHead": "hello world",
+    "textBytes": 11,
+    "textHash": "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+    "tokens": {},
+    "accumulatedContextTokens": 100
+  },
+  {
+    "kind": "text",
+    "context": "main",
+    "startedAt": "2026-05-10T10:00:03Z",
+    "textHead": "It says hello world.",
+    "textBytes": 20,
+    "textHash": "bd9f4c5321440b09f93870662be94c3dd682c91b16c72e53e90b750dead520f8",
+    "tokens": {
+      "input": 110,
+      "output": 5
+    },
+    "accumulatedContextTokens": 210
+  }
+]

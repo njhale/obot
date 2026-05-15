@@ -39,7 +39,7 @@ type entry struct {
 	AgentID         string     `json:"agentId"`
 	SourceToolUseID string     `json:"sourceToolUseID"`
 	Message         *entryMsg  `json:"message,omitempty"`
-	ToolResult      toolResult `json:"toolUseResult,omitempty"`
+	ToolResult      toolResult `json:"toolUseResult"`
 }
 
 // entryMsg is the common shape of user and assistant `message` fields.
@@ -85,11 +85,24 @@ func (m *messageContent) UnmarshalJSON(b []byte) error {
 type contentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
 	ID        string          `json:"id,omitempty"`
 	Name      string          `json:"name,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"`
+	Source    imageSource     `json:"source"`
+}
+
+// imageSource is the inner shape of an image block. Only the metadata
+// fields are decoded — the base64 `data` is held just long enough to
+// compute the original byte count, then discarded. No base64 ever
+// reaches the wire under the privacy ratchet.
+type imageSource struct {
+	Type      string `json:"type,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
+	Data      string `json:"data,omitempty"`
 }
 
 // toolResult is the part of `toolUseResult` we read — agent id fields

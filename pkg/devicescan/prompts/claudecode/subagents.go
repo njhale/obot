@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/obot-platform/obot/apiclient/types"
+	"github.com/obot-platform/obot/pkg/devicescan/prompts"
 )
 
 // maxSubagentDepth caps the recursive subagent tree. Per DESIGN.md
@@ -25,6 +26,11 @@ type parsedSubagent struct {
 	Tasks       []*taskInvocation
 	TasksByID   map[string]*taskInvocation
 	AgentToTask map[string]string
+	// Steps is the subagent-context timeline emitted from this
+	// transcript. Bridges are unresolved Task tool_use → subagent_call
+	// pairs the build layer finalizes once the recursive tree resolves.
+	Steps   []types.DeviceScanPromptStep
+	Bridges []taskBridge
 }
 
 // parseSubagentFile streams a sidechain JSONL file and aggregates its
@@ -32,8 +38,9 @@ type parsedSubagent struct {
 // recursion). Returns nil on read error so the caller can skip the
 // file cleanly.
 func parseSubagentFile(fsys fs.FS, file string) (*parsedSubagent, error) {
+	agentID := subagentIDFromFile(file)
 	s := &parsedSubagent{
-		AgentID:     subagentIDFromFile(file),
+		AgentID:     agentID,
 		ToolCalls:   newToolCallCounter(),
 		TasksByID:   map[string]*taskInvocation{},
 		AgentToTask: map[string]string{},
@@ -42,7 +49,12 @@ func parseSubagentFile(fsys fs.FS, file string) (*parsedSubagent, error) {
 		ToolCalls:   s.ToolCalls,
 		TasksByID:   s.TasksByID,
 		AgentToTask: s.AgentToTask,
+		steps:       newStepBuilder("subagent", agentID),
 	}
+	// The subagent's first user entry isn't a chunk start (we don't
+	// chunk subagents) but we still want it on the timeline. Track
+	// whether we've emitted the priming user step yet.
+	firstUserEmitted := false
 	err := scanEntries(fsys, file, func(e entry) error {
 		if s.SessionID == "" {
 			s.SessionID = e.SessionID
@@ -51,6 +63,13 @@ func parseSubagentFile(fsys fs.FS, file string) (*parsedSubagent, error) {
 		case entryAssistant:
 			absorbAssistant(pseudo, e)
 		case entryUser:
+			if !firstUserEmitted {
+				if text, ok := isRealUserChunkStart(e); ok {
+					pseudo.steps.addUser(e, text)
+					firstUserEmitted = true
+					return nil
+				}
+			}
 			absorbUserFlow(pseudo, e)
 		}
 		return nil
@@ -60,6 +79,8 @@ func parseSubagentFile(fsys fs.FS, file string) (*parsedSubagent, error) {
 	}
 	s.Metrics = pseudo.MainMetrics
 	s.Tasks = pseudo.Tasks
+	s.Steps = pseudo.steps.out
+	s.Bridges = pseudo.steps.bridges
 	sealMetrics(&s.Metrics)
 	return s, nil
 }
@@ -85,6 +106,16 @@ type candidateFile struct {
 	SessionID string
 }
 
+// resolveResult is the recursive resolver's return value: the
+// external-shape subagent tree plus the flat list of subagent-context
+// steps (own steps + descendants' steps + synthetic subagent_call
+// markers emitted in each parsed subagent's own context for the
+// children it spawned).
+type resolveResult struct {
+	Subagents []types.DeviceScanPromptSubagent
+	Steps     []types.DeviceScanPromptStep
+}
+
 // resolveSubagents resolves the recursive subagent tree rooted at
 // parentSessionID. parentTasks / parentAgentToTask come from the
 // chunk (root call) or from a previously-parsed subagent (recursive
@@ -100,17 +131,20 @@ func (rc *resolveCtx) resolveSubagents(
 	parentTasks map[string]*taskInvocation,
 	parentAgentToTask map[string]string,
 	depth int,
-) []types.DeviceScanPromptSubagent {
+) resolveResult {
 	if depth >= maxSubagentDepth {
-		return nil
+		return resolveResult{}
 	}
 
 	files := rc.subagentFilesFor(parentSessionID)
 	if len(files) == 0 {
-		return nil
+		return resolveResult{}
 	}
 
-	out := make([]types.DeviceScanPromptSubagent, 0, len(files))
+	var (
+		nodes     = make([]types.DeviceScanPromptSubagent, 0, len(files))
+		flatSteps []types.DeviceScanPromptStep
+	)
 	for _, f := range files {
 		taskID, linked := parentAgentToTask[f.AgentID]
 		// Root-level subagents must be attributable to a Task call in
@@ -145,33 +179,92 @@ func (rc *resolveCtx) resolveSubagents(
 
 		// Recurse for nested subagents using THIS subagent's id as
 		// the next parentSessionID.
-		children := rc.resolveSubagents(parsed.AgentID, parsed.TasksByID, parsed.AgentToTask, depth+1)
+		child := rc.resolveSubagents(parsed.AgentID, parsed.TasksByID, parsed.AgentToTask, depth+1)
 
 		// Transitive metrics: this node's local metrics plus the
 		// metrics of every descendant. At depth = maxSubagentDepth-1
 		// children is nil; deeper activity is silently dropped per
 		// the design contract.
 		metrics := parsed.Metrics
-		for _, c := range children {
+		for _, c := range child.Subagents {
 			addMetrics(&metrics, c.Metrics)
 		}
 		sealMetrics(&metrics)
 
-		out = append(out, types.DeviceScanPromptSubagent{
+		nodes = append(nodes, types.DeviceScanPromptSubagent{
+			SubagentID:        parsed.AgentID,
 			SubagentType:      subagentType,
 			Description:       description,
 			Metrics:           metrics,
 			MainSessionImpact: impact,
 			ToolCalls:         parsed.ToolCalls.emit(),
-			Subagents:         children,
+			Subagents:         child.Subagents,
 		})
+
+		// Flatten the timeline: this subagent's own steps, the
+		// synthetic subagent_call markers for tasks it spawned, and
+		// every descendant's steps (which already include their own
+		// synthetic markers).
+		flatSteps = append(flatSteps, parsed.Steps...)
+		flatSteps = append(flatSteps, emitSubagentCallSteps(parsed.Bridges, parsed.AgentToTask, child.Subagents)...)
+		flatSteps = append(flatSteps, child.Steps...)
 	}
 
 	// Stable order keyed off the subagent file path keeps golden
 	// fixtures deterministic.
-	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].Description < out[j].Description
+	sort.SliceStable(nodes, func(i, j int) bool {
+		return nodes[i].Description < nodes[j].Description
 	})
+	return resolveResult{Subagents: nodes, Steps: flatSteps}
+}
+
+// emitSubagentCallSteps generates synthetic subagent_call steps for
+// every Task tool_use bridge that resolves to a child subagent. The
+// returned steps live in the caller's timeline (bridges carry the
+// caller's Context + SubagentID) and the SubagentID field on each
+// step points at the spawned child's tree node — matching the spec
+// in DESIGN.md "Per-step DeviceScanPromptStep.SubagentID".
+func emitSubagentCallSteps(
+	bridges []taskBridge,
+	agentToTask map[string]string,
+	children []types.DeviceScanPromptSubagent,
+) []types.DeviceScanPromptStep {
+	if len(bridges) == 0 || len(children) == 0 {
+		return nil
+	}
+	// Reverse map: taskID → spawned agentID. Skip Tasks that never
+	// resolved to a subagent file (no tool_result with agentId).
+	taskToAgent := make(map[string]string, len(agentToTask))
+	for agent, task := range agentToTask {
+		taskToAgent[task] = agent
+	}
+	resolved := make(map[string]struct{}, len(children))
+	for _, ch := range children {
+		if ch.SubagentID != "" {
+			resolved[ch.SubagentID] = struct{}{}
+		}
+	}
+	var out []types.DeviceScanPromptStep
+	for _, br := range bridges {
+		agentID, ok := taskToAgent[br.ToolUseID]
+		if !ok {
+			continue
+		}
+		if _, ok := resolved[agentID]; !ok {
+			continue
+		}
+		head, full, hash := prompts.TruncateContent(br.Description, prompts.MaxStepHeadBytes)
+		out = append(out, types.DeviceScanPromptStep{
+			Kind:       "subagent_call",
+			Context:    br.Context,
+			SubagentID: agentID,
+			StartedAt:  types.Time{Time: br.StartedAt},
+			ToolUseID:  br.ToolUseID,
+			TextHead:   head,
+			TextBytes:  full,
+			TextHash:   hash,
+		})
+	}
 	return out
 }
 
