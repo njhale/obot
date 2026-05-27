@@ -139,6 +139,17 @@ func writeScanTable(cmd *cobra.Command, manifest types.DeviceScanManifest) error
 	}
 	skillCounts := map[string]int{}
 	for _, skill := range manifest.Skills {
+		if skill.Client == "multi" {
+			// Fan out ~/.agents/skills (global-scoped multi) into each
+			// client known to read that collection. Project-scoped multi
+			// rows don't attribute to any client.
+			if skill.ProjectPath == "" {
+				for _, c := range devicescan.AgentsSkillsSupportedClients {
+					skillCounts[c]++
+				}
+			}
+			continue
+		}
 		skillCounts[skill.Client]++
 	}
 	pluginCounts := map[string]int{}

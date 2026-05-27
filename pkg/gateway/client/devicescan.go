@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obot-platform/obot/pkg/devicescan"
 	"github.com/obot-platform/obot/pkg/gateway/types"
 	"gorm.io/gorm"
 )
@@ -621,6 +622,20 @@ func (c *Client) ListDeviceClientFleetSummaries(ctx context.Context, opts Device
 		skillCounts = skillCounts.Where(fmt.Sprintf("sk.client %s ?", like), nameFilterArg)
 	}
 
+	// Count global multi skills (~/.agents/skills) once so sort by
+	// skill_count reflects the fan-out into supporting clients.
+	var globalMultiSkillCount int64
+	if err := db.Table("device_scan_skills AS sk").
+		Joins("JOIN device_scans AS s ON s.id = sk.device_scan_id").
+		Where("s.id IN (?)", latest).
+		Where("sk.client = ?", "multi").
+		Where("sk.project_path = ?", "").
+		Where("sk.name <> ''").
+		Distinct("sk.name").
+		Count(&globalMultiSkillCount).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to count global agents skills: %w", err)
+	}
+
 	mcpServerCounts := db.Table("device_scan_mcp_servers AS m").
 		Joins("JOIN device_scans AS s ON s.id = m.device_scan_id").
 		Where("s.id IN (?)", latest).
@@ -651,11 +666,16 @@ func (c *Client) ListDeviceClientFleetSummaries(ctx context.Context, opts Device
 		sortOrder = "DESC"
 	}
 
+	supportedClientsArg := make([]any, 0, len(devicescan.AgentsSkillsSupportedClients))
+	for _, sc := range devicescan.AgentsSkillsSupportedClients {
+		supportedClientsArg = append(supportedClientsArg, sc)
+	}
 	q := base.Session(&gorm.Session{}).
 		Select(`cl.name AS name,
 			COALESCE(user_counts.user_count, 0) AS user_count,
-			COALESCE(skill_counts.skill_count, 0) AS skill_count,
-			COALESCE(mcp_server_counts.mcp_server_count, 0) AS mcp_server_count`).
+			COALESCE(skill_counts.skill_count, 0) + (CASE WHEN cl.name IN ? THEN ? ELSE 0 END) AS skill_count,
+			COALESCE(mcp_server_counts.mcp_server_count, 0) AS mcp_server_count`,
+			supportedClientsArg, globalMultiSkillCount).
 		Joins("LEFT JOIN (?) AS user_counts ON user_counts.name = cl.name", userCounts).
 		Joins("LEFT JOIN (?) AS skill_counts ON skill_counts.name = cl.name", skillCounts).
 		Joins("LEFT JOIN (?) AS mcp_server_counts ON mcp_server_counts.name = cl.name", mcpServerCounts).
@@ -778,6 +798,54 @@ func (c *Client) deviceClientFleetSummariesForNames(ctx context.Context, names [
 			Files:       len(sk.Files),
 		})
 	}
+
+	// Fan out global multi skills (e.g. ~/.agents/skills) into each
+	// requested client that's in AgentsSkillsSupportedClients. Dedup is
+	// shared with the per-client pass above, so a same-named skill
+	// already directly attributed to a client wins over the fan-out.
+	supportedTargets := make([]string, 0, len(names))
+	{
+		want := map[string]struct{}{}
+		for _, c := range devicescan.AgentsSkillsSupportedClients {
+			want[c] = struct{}{}
+		}
+		for _, n := range names {
+			if _, ok := want[n]; ok {
+				supportedTargets = append(supportedTargets, n)
+			}
+		}
+	}
+	if len(supportedTargets) > 0 {
+		var globalSkills []types.DeviceScanSkill
+		if err := db.Table("device_scan_skills AS sk").
+			Joins("JOIN device_scans AS s ON s.id = sk.device_scan_id").
+			Where("s.id IN (?)", latest).
+			Where("sk.client = ?", "multi").
+			Where("sk.project_path = ?", "").
+			Where("sk.name <> ''").
+			Order("sk.name ASC, sk.id ASC").
+			Find(&globalSkills).Error; err != nil {
+			return nil, fmt.Errorf("failed to load global agents skills: %w", err)
+		}
+		for _, sk := range globalSkills {
+			for _, cn := range supportedTargets {
+				if seenSkillKey[cn] == nil {
+					seenSkillKey[cn] = map[string]struct{}{}
+				}
+				if _, dup := seenSkillKey[cn][sk.Name]; dup {
+					continue
+				}
+				seenSkillKey[cn][sk.Name] = struct{}{}
+				skillsByClient[cn] = append(skillsByClient[cn], DeviceClientFleetSkill{
+					Name:        sk.Name,
+					Description: sk.Description,
+					HasScripts:  sk.HasScripts,
+					Files:       len(sk.Files),
+				})
+			}
+		}
+	}
+
 	for cl := range skillsByClient {
 		slices.SortFunc(skillsByClient[cl], func(a, b DeviceClientFleetSkill) int {
 			return strings.Compare(a.Name, b.Name)

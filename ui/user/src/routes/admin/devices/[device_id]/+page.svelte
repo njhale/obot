@@ -332,7 +332,7 @@
 						>
 							{#snippet onRenderColumn(property, d: MCPRow)}
 								{#if property === 'client'}
-									{@render clientLink(d.client)}
+									{@render clientLink(d.client, d.projectPath)}
 								{:else}
 									{d[property as keyof MCPRow] ?? '—'}
 								{/if}
@@ -399,7 +399,7 @@
 								{:else if property === 'hasScripts'}
 									{d.hasScripts ? 'yes' : 'no'}
 								{:else if property === 'client'}
-									{@render clientLink(d.client)}
+									{@render clientLink(d.client, d.projectPath)}
 								{:else}
 									{d[property as keyof SkillRow] ?? '—'}
 								{/if}
@@ -469,7 +469,7 @@
 								{:else if property === 'version'}
 									{d.version ?? '—'}
 								{:else if property === 'client'}
-									{@render clientLink(d.client)}
+									{@render clientLink(d.client, d.projectPath)}
 								{:else}
 									{d[property as keyof PluginRow] ?? '—'}
 								{/if}
@@ -559,7 +559,7 @@
 	</div>
 {/snippet}
 
-{#snippet clientLink(client?: string)}
+{#snippet clientLink(client?: string, projectPath?: string)}
 	{#if client && client.trim() !== 'multi'}
 		<a
 			class="btn-link text-blue-500"
@@ -568,6 +568,8 @@
 		>
 			{client}
 		</a>
+	{:else if client === 'multi' && !projectPath}
+		Global
 	{:else}
 		{client || '-'}
 	{/if}

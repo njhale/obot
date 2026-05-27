@@ -35,8 +35,9 @@ var (
 	// children are skill directories. The tool tag is wired into Client
 	// on the wire observation. Dirs with no canonical owning client
 	// (`.agents/skills`, `.agent/skills`) are intentionally absent —
-	// skills found in those locations come through scanProjectSkills
-	// with client=multiClient ("multi") instead.
+	// skills found in those locations come through scanProjectSkills as
+	// client=multiClient ("multi") with global scope (empty ProjectPath)
+	// via the agentsSkillsDirs branch.
 	globalSkillDirs = []struct {
 		rel  string
 		tool string
@@ -46,6 +47,19 @@ var (
 		{".config/opencode/skills", "opencode"},
 		{".skillport/skills", "skillport"},
 	}
+
+	// agentsSkillsDirs are home-relative prefixes whose SKILL.md files
+	// are user-global collections shared by multiple AI clients. Skills
+	// under these paths get client=multiClient with empty ProjectPath
+	// (global scope) regardless of nesting depth.
+	agentsSkillsDirs = []string{".agents/skills/", ".agent/skills/"}
+
+	// AgentsSkillsSupportedClients is the hardcoded list of clients
+	// known to read SKILL.md files from ~/.agents/skills. Exported so
+	// the gateway and CLI can attribute per-client counts to these
+	// clients without duplicating skill rows on the wire. Update when a
+	// new client adopts the convention.
+	AgentsSkillsSupportedClients = []string{"cursor", "vscode", "opencode", "goose"}
 
 	// homeClientTool maps the first home-relative path component to a
 	// tool tag, used to attribute SKILL.md files found anywhere under
@@ -110,7 +124,11 @@ func scanProjectSkills(s *scanState, skillMarkers []string) []types.DeviceScanSk
 				out = append(out, sk)
 			}
 		} else {
-			if sk, ok := ingestSkill(s, skillDir, multiClient, s.abs(skillDir)); ok {
+			projectPath := s.abs(skillDir)
+			if isAgentsCollectionSkill(m) {
+				projectPath = ""
+			}
+			if sk, ok := ingestSkill(s, skillDir, multiClient, projectPath); ok {
 				out = append(out, sk)
 			}
 		}
@@ -177,4 +195,15 @@ func inferHomeTool(rel string) (string, bool) {
 	first, _, _ := strings.Cut(rel, "/")
 	tool, ok := homeClientTool[first]
 	return tool, ok
+}
+
+// isAgentsCollectionSkill reports whether rel is under a ~/.agents/skills
+// (or ~/.agent/skills) collection — a multi-client user-global skills tree.
+func isAgentsCollectionSkill(rel string) bool {
+	for _, p := range agentsSkillsDirs {
+		if strings.HasPrefix(rel, p) {
+			return true
+		}
+	}
+	return false
 }

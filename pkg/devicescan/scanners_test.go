@@ -2,10 +2,12 @@ package devicescan
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/obot-platform/obot/apiclient/types"
+	"github.com/stretchr/testify/require"
 )
 
 // runScanFS runs Scan against an in-memory fs with a neutralised
@@ -205,5 +207,63 @@ func TestScan_ProjectScopeWalk(t *testing.T) {
 	}
 	if s.ProjectPath == "" {
 		t.Errorf("ProjectPath empty for project-scope hit; want non-empty")
+	}
+}
+
+// findSkillByFileSuffix returns the first skill whose SKILL.md absolute
+// path ends with suffix, or nil.
+func findSkillByFileSuffix(scan types.DeviceScanManifest, suffix string) *types.DeviceScanSkill {
+	for i, sk := range scan.Skills {
+		if strings.HasSuffix(sk.File, suffix) {
+			return &scan.Skills[i]
+		}
+	}
+	return nil
+}
+
+// TestAgentsSkillsScanGlobalScope covers the ~/.agents/skills (and
+// ~/.agent/skills) convention: skills under those paths are emitted as
+// client=multi with empty ProjectPath (global scope) at arbitrary nesting
+// depth, while a free-floating multi skill outside that tree stays
+// project-scoped.
+func TestAgentsSkillsScanGlobalScope(t *testing.T) {
+	scan := runScanFS(t, map[string]string{
+		".agents/skills/foo/SKILL.md":     "---\nname: foo\n---\nbody",
+		".agent/skills/bar/SKILL.md":      "---\nname: bar\n---\nbody",
+		".agents/skills/cat/baz/SKILL.md": "---\nname: baz\n---\nbody",
+		"myproj/skills/qux/SKILL.md":      "---\nname: qux\n---\nbody",
+	})
+
+	foo := findSkillByFileSuffix(scan, ".agents/skills/foo/SKILL.md")
+	require.NotNil(t, foo, "agents-skills depth-1 skill missing")
+	require.Equal(t, "multi", foo.Client)
+	require.Empty(t, foo.ProjectPath, "agents-skills row should be global-scoped")
+
+	bar := findSkillByFileSuffix(scan, ".agent/skills/bar/SKILL.md")
+	require.NotNil(t, bar, "agent-skills singular variant missing")
+	require.Equal(t, "multi", bar.Client)
+	require.Empty(t, bar.ProjectPath, ".agent/skills row should be global-scoped")
+
+	baz := findSkillByFileSuffix(scan, ".agents/skills/cat/baz/SKILL.md")
+	require.NotNil(t, baz, "nested agents-skills row missing")
+	require.Equal(t, "multi", baz.Client)
+	require.Empty(t, baz.ProjectPath, "nested agents-skills row should be global-scoped")
+
+	qux := findSkillByFileSuffix(scan, "myproj/skills/qux/SKILL.md")
+	require.NotNil(t, qux, "free-floating project-multi skill missing")
+	require.Equal(t, "multi", qux.Client)
+	require.NotEmpty(t, qux.ProjectPath, "free-floating multi row should stay project-scoped")
+}
+
+// TestAgentsSkillsSupportedClients guards the contract that consumers
+// (gateway, CLI) rely on: cursor, vscode, opencode, and goose are all
+// part of the exported supporting-clients list.
+func TestAgentsSkillsSupportedClients(t *testing.T) {
+	got := map[string]bool{}
+	for _, c := range AgentsSkillsSupportedClients {
+		got[c] = true
+	}
+	for _, want := range []string{"cursor", "vscode", "opencode", "goose"} {
+		require.True(t, got[want], "AgentsSkillsSupportedClients missing %q", want)
 	}
 }
