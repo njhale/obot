@@ -443,3 +443,45 @@ func newPopulateComponentManifestsRequest(objects ...client.Object) api.Context 
 			Build()),
 	}
 }
+
+func TestPopulateComponentManifestsDropsComponentsWithoutASource(t *testing.T) {
+	entry := &v1.MCPServerCatalogEntry{
+		ObjectMeta: metav1.ObjectMeta{Name: "component-entry", Namespace: system.DefaultNamespace},
+		Spec: v1.MCPServerCatalogEntrySpec{
+			MCPCatalogName: "default",
+			Manifest: types.MCPServerCatalogEntryManifest{
+				Name:           "Component Server",
+				Runtime:        types.RuntimeNPX,
+				ServerUserType: types.ServerUserTypeSingleUser,
+				NPXConfig:      &types.NPXRuntimeConfig{Package: "@example/component"},
+			},
+		},
+	}
+	manifest := types.MCPServerCatalogEntryManifest{
+		Runtime: types.RuntimeComposite,
+		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+			{CatalogEntryID: "deleted-entry"},
+			{CatalogEntryID: "component-entry"},
+		}},
+	}
+
+	err := (&MCPCatalogHandler{}).populateComponentManifests(newPopulateComponentManifestsRequest(entry), &manifest, "default", "")
+
+	require.NoError(t, err)
+	require.Len(t, manifest.CompositeConfig.ComponentServers, 1)
+	assert.Equal(t, "component-entry", manifest.CompositeConfig.ComponentServers[0].CatalogEntryID)
+}
+
+func TestPopulateComponentManifestsRejectsWorkspaceScopedComposites(t *testing.T) {
+	manifest := types.MCPServerCatalogEntryManifest{
+		Runtime: types.RuntimeComposite,
+		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+			{CatalogEntryID: "component-entry"},
+		}},
+	}
+
+	err := (&MCPCatalogHandler{}).populateComponentManifests(newPopulateComponentManifestsRequest(), &manifest, "", "workspace-1")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported in power user workspaces")
+}

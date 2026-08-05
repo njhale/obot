@@ -437,3 +437,49 @@ func testMCPServer(name, namespace string, manifest types.MCPServerManifest) *v1
 		},
 	}
 }
+
+func TestResolveCompositeSourceRefsRejectsNestedCompositeComponent(t *testing.T) {
+	inner := testCatalogEntry("inner", "source", "inner", types.MCPServerCatalogEntryManifest{
+		Name:            "Inner",
+		Runtime:         types.RuntimeComposite,
+		ServerUserType:  types.ServerUserTypeSingleUser,
+		CompositeConfig: &types.CompositeCatalogConfig{},
+	})
+	outer := testCatalogEntry("outer", "source", "outer", types.MCPServerCatalogEntryManifest{
+		Name:           "Outer",
+		Runtime:        types.RuntimeComposite,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+			{CatalogEntryID: sourceRef("source", "inner")},
+		}},
+	})
+
+	result, errsBySourceURL := (&Handler{}).resolveCompositeSourceRefs(t.Context(), nil, "", "", []client.Object{inner, outer})
+
+	// The nested composite is rejected before it can be snapshotted, so the outer entry is skipped.
+	assert.Len(t, result, 1)
+	assert.Equal(t, "inner", result[0].GetName())
+	assert.Contains(t, errsBySourceURL["source"], "itself composite")
+}
+
+func TestResolveCompositeSourceRefsRejectsMultiUserComponentEntry(t *testing.T) {
+	target := testCatalogEntry("multi-user-entry", "source", "shared", types.MCPServerCatalogEntryManifest{
+		Name:           "Shared",
+		Runtime:        types.RuntimeNPX,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "shared"},
+		ServerUserType: types.ServerUserTypeMultiUser,
+	})
+	composite := testCatalogEntry("composite", "source", "composite", types.MCPServerCatalogEntryManifest{
+		Name:           "Composite",
+		Runtime:        types.RuntimeComposite,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+			{CatalogEntryID: sourceRef("source", "shared")},
+		}},
+	})
+
+	result, errsBySourceURL := (&Handler{}).resolveCompositeSourceRefs(t.Context(), nil, "", "", []client.Object{target, composite})
+
+	assert.Len(t, result, 1)
+	assert.Contains(t, errsBySourceURL["source"], "use the multi-user MCP server instead")
+}

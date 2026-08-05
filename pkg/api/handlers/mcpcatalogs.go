@@ -23,7 +23,6 @@ import (
 	"github.com/obot-platform/obot/pkg/tunnel"
 	"github.com/obot-platform/obot/pkg/utils"
 	"golang.org/x/crypto/bcrypt"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -407,6 +406,13 @@ func (h *MCPCatalogHandler) UpdateEntry(req api.Context) error {
 	}
 	if manifest.ServerUserType == "" {
 		manifest.ServerUserType = types.ServerUserTypeSingleUser
+	}
+	// Component references arrive from the client here, so validate them against their
+	// sources the same way the create path does.
+	if manifest.Runtime == types.RuntimeComposite && manifest.CompositeConfig != nil {
+		if err := mcp.ValidateComponentRefs(req.Context(), req.Storage, req.Namespace(), catalogName, workspaceID, manifest.CompositeConfig.ComponentServers); err != nil {
+			return types.NewErrBadRequest("failed to validate entry manifest: %v", err)
+		}
 	}
 	if err := validateCatalogEntryManifestWithResourceMaximums(req, manifest, false, h.sessionManager); err != nil {
 		return types.NewErrBadRequest("failed to validate entry manifest: %v", err)
@@ -1664,77 +1670,34 @@ func normalizeMCPCatalogEntryName(name string) string {
 }
 
 func (h *MCPCatalogHandler) populateComponentManifests(req api.Context, manifest *types.MCPServerCatalogEntryManifest, catalogName, workspaceID string) error {
-	// For each component server, fetch its catalog entry and populate the manifest
-	var componentServers []types.CatalogComponentServer
-	for i := range manifest.CompositeConfig.ComponentServers {
-		var (
-			component                    = &manifest.CompositeConfig.ComponentServers[i]
-			hasCatalogEntry, hasServerID = component.CatalogEntryID != "", component.MCPServerID != ""
-		)
-		// Validate that exactly one of CatalogEntryID or MCPServerID is set
-		if hasCatalogEntry && hasServerID {
-			return types.NewErrBadRequest("component cannot have both catalogEntryID and mcpServerID set")
-		}
-		if !hasCatalogEntry && !hasServerID {
-			return types.NewErrBadRequest("component must have either catalogEntryID or mcpServerID set")
-		}
-
-		if component.MCPServerID != "" {
-			// Multi-user server component
-			var server v1.MCPServer
-			if err := req.Get(&server, component.MCPServerID); err != nil {
-				if apierrors.IsNotFound(err) {
-					// Skip components referencing servers that no longer exist
-					continue
-				}
-				return types.NewErrBadRequest("failed to get multi-user server %s: %v", component.MCPServerID, err)
-			}
-
-			// Verify this is actually a multi-user server
-			if server.Spec.IsSingleUser() {
-				return types.NewErrBadRequest("server %s is not a multi-user server", component.MCPServerID)
-			}
-
-			// Verify the server belongs to the same catalog
-			if catalogName != "" && server.Spec.MCPCatalogID != catalogName {
-				return types.NewErrBadRequest("multi-user server %s belongs to catalog %s, not %s", component.MCPServerID, server.Spec.MCPCatalogID, catalogName)
-			}
-
-			// Populate the manifest snapshot from the multi-user server
-			component.Manifest = server.Spec.Manifest.ConvertToCatalogEntry()
-			// Keep this component
-			componentServers = append(componentServers, *component)
-		} else {
-			// Catalog entry component
-			var entry v1.MCPServerCatalogEntry
-			if err := req.Get(&entry, component.CatalogEntryID); err != nil {
-				if apierrors.IsNotFound(err) {
-					// Skip components referencing catalog entries that no longer exist
-					continue
-				}
-				return types.NewErrBadRequest("failed to get component catalog entry %s: %v", component.CatalogEntryID, err)
-			}
-
-			// Verify the component entry belongs to the same scope
-			if catalogName != "" && entry.Spec.MCPCatalogName != catalogName {
-				return types.NewErrBadRequest("component entry %s does not belong to catalog %s", component.CatalogEntryID, catalogName)
-			}
-			if workspaceID != "" && entry.Spec.PowerUserWorkspaceID != workspaceID {
-				return types.NewErrBadRequest("component entry %s does not belong to workspace %s", component.CatalogEntryID, workspaceID)
-			}
-
-			if entry.Spec.Manifest.ServerUserType == types.ServerUserTypeMultiUser {
-				return types.NewErrBadRequest("multi-user catalog entry %s cannot be included in a composite server; use the multi-user MCP server instead", component.CatalogEntryID)
-			}
-
-			// Populate the manifest
-			component.Manifest = entry.Spec.Manifest
-			// Keep this component
-			componentServers = append(componentServers, *component)
-		}
+	// Composite entries are catalog-scoped for now.
+	if workspaceID != "" {
+		return types.NewErrBadRequest("composite catalog entries are not supported in power user workspaces")
 	}
 
-	// Replace with filtered component list
+	resolved, err := mcp.ResolveComponents(req.Context(), req.Storage, req.Namespace(), manifest.CompositeConfig.ComponentServers)
+	if err != nil {
+		return types.NewErrBadRequest("%v", err)
+	}
+
+	// Left nil when every component is dropped, so the stored manifest keeps marshalling
+	// identically to before and does not register as drift.
+	var componentServers []types.CatalogComponentServer
+	for _, component := range resolved {
+		if err := mcp.ValidateComponent(component, catalogName, workspaceID); err != nil {
+			return types.NewErrBadRequest("%v", err)
+		}
+
+		// Drop components whose source no longer exists.
+		if component.Unresolved() {
+			continue
+		}
+
+		keep := component.Ref
+		keep.Manifest = component.CatalogEntryManifest()
+		componentServers = append(componentServers, keep)
+	}
+
 	manifest.CompositeConfig.ComponentServers = componentServers
 
 	return nil

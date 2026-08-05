@@ -398,12 +398,8 @@ func (h *Handler) resolveCompositeSourceRefs(ctx context.Context, c client.Clien
 					errs = append(errs, fmt.Errorf("failed to get multi-user server %q: %w", component.MCPServerID, err))
 					continue
 				}
-				if server.Spec.IsSingleUser() {
-					errs = append(errs, fmt.Errorf("server %q is not a multi-user server", component.MCPServerID))
-					continue
-				}
-				if catalogName != "" && server.Spec.MCPCatalogID != catalogName {
-					errs = append(errs, fmt.Errorf("multi-user server %q not found in catalog %q", component.MCPServerID, catalogName))
+				if err := mcp.ValidateComponent(mcp.ResolvedComponent{Ref: *component, Server: &server}, catalogName, ""); err != nil {
+					errs = append(errs, err)
 					continue
 				}
 
@@ -423,20 +419,26 @@ func (h *Handler) resolveCompositeSourceRefs(ctx context.Context, c client.Clien
 			if target == nil {
 				target = entriesByName[component.CatalogEntryID]
 			}
+			// Targets found in this sync batch are being written into the catalog by this same
+			// pass, so their catalog membership is implied rather than already stored. Only a
+			// target read back from storage can be scope-checked.
+			scope := ""
 			if target == nil && c != nil {
 				var storedEntry v1.MCPServerCatalogEntry
 				if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: component.CatalogEntryID}, &storedEntry); err != nil && !apierrors.IsNotFound(err) {
 					errs = append(errs, fmt.Errorf("failed to get component catalog entry %q: %w", component.CatalogEntryID, err))
 					continue
 				} else if err == nil {
-					if catalogName != "" && storedEntry.Spec.MCPCatalogName != catalogName {
-						errs = append(errs, fmt.Errorf("component catalog entry %q not found in catalog %q", component.CatalogEntryID, catalogName))
-						continue
-					}
 					target = &storedEntry
+					scope = catalogName
 				}
 			}
 			if target == nil {
+				continue
+			}
+
+			if err := mcp.ValidateComponent(mcp.ResolvedComponent{Ref: *component, Entry: target}, scope, ""); err != nil {
+				errs = append(errs, err)
 				continue
 			}
 
