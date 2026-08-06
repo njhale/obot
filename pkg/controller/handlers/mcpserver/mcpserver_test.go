@@ -1298,8 +1298,213 @@ func newFakeClient(t *testing.T, objects ...kclient.Object) kclient.WithWatch {
 			}
 			return []string{policy.Spec.MCPServerName}
 		}).
+		WithIndex(&v1.MCPServer{}, "spec.compositeName", func(obj kclient.Object) []string {
+			server := obj.(*v1.MCPServer)
+			if server.Spec.CompositeName == "" {
+				return nil
+			}
+			return []string{server.Spec.CompositeName}
+		}).
+		WithIndex(&v1.MCPServerInstance{}, "spec.compositeName", func(obj kclient.Object) []string {
+			instance := obj.(*v1.MCPServerInstance)
+			if instance.Spec.CompositeName == "" {
+				return nil
+			}
+			return []string{instance.Spec.CompositeName}
+		}).
 		WithObjects(objects...).
 		Build()
+}
+
+func newCompositeServer(name string, components ...types.ComponentServer) *v1.MCPServer {
+	server := newMCPServer(name)
+	server.Spec.UserID = "user-1"
+	server.Spec.Manifest = types.MCPServerManifest{
+		Name:            name,
+		Runtime:         types.RuntimeComposite,
+		CompositeConfig: &types.CompositeRuntimeConfig{ComponentServers: components},
+	}
+	return server
+}
+
+func componentServersOf(t *testing.T, c kclient.Client, composite *v1.MCPServer) []v1.MCPServer {
+	t.Helper()
+
+	var list v1.MCPServerList
+	require.NoError(t, c.List(t.Context(), &list, kclient.InNamespace(composite.Namespace),
+		kclient.MatchingFields{"spec.compositeName": composite.Name}))
+	return list.Items
+}
+
+func ensureCompositeComponents(t *testing.T, c kclient.WithWatch, composite *v1.MCPServer) error {
+	t.Helper()
+
+	return (&Handler{}).EnsureCompositeComponents(router.Request{
+		Client:    c,
+		Ctx:       t.Context(),
+		Object:    composite,
+		Namespace: composite.Namespace,
+		Name:      composite.Name,
+	}, &router.ResponseWrapper{})
+}
+
+func TestEnsureCompositeComponentsDerivesNewComponentFromItsCatalogEntry(t *testing.T) {
+	entry := newMCPServerCatalogEntry("gmail-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Gmail",
+		Runtime:        types.RuntimeNPX,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "@example/gmail@2.0.0"},
+	})
+	// The composite still carries an older snapshot of the component.
+	composite := newCompositeServer("composite", types.ComponentServer{
+		CatalogEntryID: entry.Name,
+		Manifest: types.MCPServerManifest{
+			Name:      "Gmail",
+			Runtime:   types.RuntimeNPX,
+			NPXConfig: &types.NPXRuntimeConfig{Package: "@example/gmail@1.0.0"},
+		},
+	})
+	c := newFakeClient(t, entry, composite)
+
+	require.NoError(t, ensureCompositeComponents(t, c, composite))
+
+	children := componentServersOf(t, c, composite)
+	require.Len(t, children, 1)
+	require.NotNil(t, children[0].Spec.Manifest.NPXConfig)
+	assert.Equal(t, "@example/gmail@2.0.0", children[0].Spec.Manifest.NPXConfig.Package,
+		"a new component server must come from its catalog entry, not the composite's snapshot")
+	assert.Equal(t, entry.Name, children[0].Spec.MCPServerCatalogEntryName)
+	assert.Equal(t, composite.Name, children[0].Spec.CompositeName)
+	assert.Equal(t, "user-1", children[0].Spec.UserID)
+}
+
+func TestEnsureCompositeComponentsPreservesUserSuppliedComponentURL(t *testing.T) {
+	entry := newMCPServerCatalogEntry("remote-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Remote",
+		Runtime:        types.RuntimeRemote,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		RemoteConfig:   &types.RemoteCatalogConfig{Hostname: "*.example.com"},
+	})
+	composite := newCompositeServer("composite", types.ComponentServer{
+		CatalogEntryID: entry.Name,
+		Manifest: types.MCPServerManifest{
+			Name:         "Remote",
+			Runtime:      types.RuntimeRemote,
+			RemoteConfig: &types.RemoteRuntimeConfig{URL: "https://tenant.example.com/mcp", Hostname: "*.example.com"},
+		},
+	})
+	c := newFakeClient(t, entry, composite)
+
+	require.NoError(t, ensureCompositeComponents(t, c, composite))
+
+	children := componentServersOf(t, c, composite)
+	require.Len(t, children, 1)
+	require.NotNil(t, children[0].Spec.Manifest.RemoteConfig)
+	assert.Equal(t, "https://tenant.example.com/mcp", children[0].Spec.Manifest.RemoteConfig.URL)
+	assert.False(t, children[0].Spec.NeedsURL)
+}
+
+func TestEnsureCompositeComponentsFlagsRemoteComponentMissingItsURL(t *testing.T) {
+	entry := newMCPServerCatalogEntry("remote-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Remote",
+		Runtime:        types.RuntimeRemote,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		RemoteConfig:   &types.RemoteCatalogConfig{Hostname: "*.example.com"},
+	})
+	composite := newCompositeServer("composite", types.ComponentServer{CatalogEntryID: entry.Name})
+	c := newFakeClient(t, entry, composite)
+
+	require.NoError(t, ensureCompositeComponents(t, c, composite))
+
+	children := componentServersOf(t, c, composite)
+	require.Len(t, children, 1)
+	assert.True(t, children[0].Spec.NeedsURL,
+		"a hostname-constrained component without a URL must be flagged for configuration")
+}
+
+func TestEnsureCompositeComponentsLeavesExistingComponentAloneWhenOnlyItsEntryChanged(t *testing.T) {
+	// Component updates stay gated on the composite's own configuration: an edit to the
+	// catalog entry alone must not rewrite a running component server. Phase 4 replaces this
+	// trigger with per-component drift plus an explicit update, and this assertion is what
+	// makes that change visible.
+	entry := newMCPServerCatalogEntry("gmail-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Gmail",
+		Runtime:        types.RuntimeNPX,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "@example/gmail@2.0.0"},
+	})
+	componentManifest := types.MCPServerManifest{
+		Name:      "Gmail",
+		Runtime:   types.RuntimeNPX,
+		NPXConfig: &types.NPXRuntimeConfig{Package: "@example/gmail@1.0.0"},
+	}
+	composite := newCompositeServer("composite", types.ComponentServer{
+		CatalogEntryID: entry.Name,
+		Manifest:       componentManifest,
+	})
+
+	child := newMCPServer("component-server")
+	child.Spec.CompositeName = composite.Name
+	child.Spec.MCPServerCatalogEntryName = entry.Name
+	child.Spec.UserID = composite.Spec.UserID
+	child.Spec.Manifest = componentManifest
+
+	c := newFakeClient(t, entry, composite, child)
+
+	// Reaching the update branch would dereference a nil session manager, so completing
+	// without panicking is itself part of the assertion.
+	require.NoError(t, ensureCompositeComponents(t, c, composite))
+
+	children := componentServersOf(t, c, composite)
+	require.Len(t, children, 1)
+	require.NotNil(t, children[0].Spec.Manifest.NPXConfig)
+	assert.Equal(t, "@example/gmail@1.0.0", children[0].Spec.Manifest.NPXConfig.Package,
+		"an entry edit alone must not rewrite a running component server")
+}
+
+func TestEnsureCompositeComponentsSkipsComponentWithMissingCatalogEntry(t *testing.T) {
+	entry := newMCPServerCatalogEntry("present-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Present",
+		Runtime:        types.RuntimeNPX,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "@example/present"},
+	})
+	composite := newCompositeServer("composite",
+		types.ComponentServer{CatalogEntryID: "deleted-entry"},
+		types.ComponentServer{CatalogEntryID: entry.Name},
+	)
+	c := newFakeClient(t, entry, composite)
+
+	require.NoError(t, ensureCompositeComponents(t, c, composite),
+		"a deleted component source must not fail the whole composite")
+
+	children := componentServersOf(t, c, composite)
+	require.Len(t, children, 1)
+	assert.Equal(t, entry.Name, children[0].Spec.MCPServerCatalogEntryName)
+}
+
+func TestEnsureCompositeComponentsSkipsComponentWithMissingMultiUserServer(t *testing.T) {
+	entry := newMCPServerCatalogEntry("present-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Present",
+		Runtime:        types.RuntimeNPX,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "@example/present"},
+	})
+	composite := newCompositeServer("composite",
+		types.ComponentServer{MCPServerID: "deleted-server"},
+		types.ComponentServer{CatalogEntryID: entry.Name},
+	)
+	c := newFakeClient(t, entry, composite)
+
+	require.NoError(t, ensureCompositeComponents(t, c, composite))
+
+	var instances v1.MCPServerInstanceList
+	require.NoError(t, c.List(t.Context(), &instances, kclient.InNamespace(composite.Namespace),
+		kclient.MatchingFields{"spec.compositeName": composite.Name}))
+	assert.Empty(t, instances.Items)
+
+	children := componentServersOf(t, c, composite)
+	require.Len(t, children, 1, "the healthy component must still materialize")
 }
 
 func newMCPServer(name string) *v1.MCPServer {

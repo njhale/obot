@@ -879,11 +879,12 @@ func (h *Handler) EnsureCompositeComponents(req router.Request, _ router.Respons
 		}
 	}
 
-	// withNeedsURL returns the given MCP server with a NeedsURL field set according to its hostname constraint and url.
-	// If the server is not remote, or does not have a hostname constraint, it returns the unmodified server.
+	// withNeedsURL returns the given component server with NeedsURL set according to its own
+	// hostname constraint and URL. Components that are not remote, or that have no hostname
+	// constraint, are returned unmodified.
 	withNeedsURL := func(server v1.MCPServer) v1.MCPServer {
-		remoteConfig := compositeServer.Spec.Manifest.RemoteConfig
-		if compositeServer.Spec.Manifest.Runtime != types.RuntimeRemote || remoteConfig == nil || remoteConfig.Hostname == "" {
+		remoteConfig := server.Spec.Manifest.RemoteConfig
+		if server.Spec.Manifest.Runtime != types.RuntimeRemote || remoteConfig == nil || remoteConfig.Hostname == "" {
 			return server
 		}
 
@@ -901,7 +902,13 @@ func (h *Handler) EnsureCompositeComponents(req router.Request, _ router.Respons
 			if _, exists := existingInstances[component.MCPServerID]; !exists {
 				// New instance, create it
 				var multiUserServer v1.MCPServer
-				if err := req.Get(&multiUserServer, compositeServer.Namespace, component.MCPServerID); err != nil {
+				if err := req.Get(&multiUserServer, compositeServer.Namespace, component.MCPServerID); apierrors.IsNotFound(err) {
+					// The referenced server is gone. Skip this component rather than failing the
+					// whole composite, so the remaining components keep reconciling.
+					log.Infof("Skipping composite component with missing multi-user server: composite=%s componentServer=%s", compositeServer.Name, component.MCPServerID)
+					delete(existingInstances, component.MCPServerID)
+					continue
+				} else if err != nil {
 					return fmt.Errorf("failed to get multi-user server %s: %w", component.MCPServerID, err)
 				}
 
@@ -926,7 +933,13 @@ func (h *Handler) EnsureCompositeComponents(req router.Request, _ router.Respons
 			} else {
 				existingInstance := existingInstances[component.MCPServerID]
 				var multiUserServer v1.MCPServer
-				if err := req.Get(&multiUserServer, compositeServer.Namespace, component.MCPServerID); err != nil {
+				if err := req.Get(&multiUserServer, compositeServer.Namespace, component.MCPServerID); apierrors.IsNotFound(err) {
+					// Keep the existing instance and its user configuration rather than pruning it
+					// on a reference that may be transiently unresolvable.
+					log.Infof("Skipping composite component with missing multi-user server: composite=%s componentServer=%s", compositeServer.Name, component.MCPServerID)
+					delete(existingInstances, component.MCPServerID)
+					continue
+				} else if err != nil {
 					return fmt.Errorf("failed to get multi-user server %s: %w", component.MCPServerID, err)
 				}
 
@@ -945,7 +958,31 @@ func (h *Handler) EnsureCompositeComponents(req router.Request, _ router.Respons
 
 		// Catalog entry component
 		if existingServer, exists := existingServers[component.CatalogEntryID]; !exists {
-			// New server, create it
+			// Derive a new component server from its source catalog entry rather than from the
+			// composite's snapshot, so a component always materializes with current configuration.
+			var componentEntry v1.MCPServerCatalogEntry
+			if err := req.Get(&componentEntry, compositeServer.Namespace, component.CatalogEntryID); apierrors.IsNotFound(err) {
+				log.Infof("Skipping composite component with missing catalog entry: composite=%s catalogEntry=%s", compositeServer.Name, component.CatalogEntryID)
+				continue
+			} else if err != nil {
+				return fmt.Errorf("failed to get component catalog entry %s: %w", component.CatalogEntryID, err)
+			}
+
+			// A user-supplied URL can only come from the composite at this point, because the
+			// component server that would otherwise hold it does not exist yet.
+			var userURL string
+			if remoteConfig := component.Manifest.RemoteConfig; remoteConfig != nil {
+				userURL = remoteConfig.URL
+			}
+
+			// Hostname validation is deferred to withNeedsURL below: a component whose URL is
+			// missing or no longer valid is flagged for configuration rather than failing the
+			// whole composite's reconcile.
+			componentManifest, err := types.MapCatalogEntryToServer(componentEntry.Spec.Manifest, userURL, true)
+			if err != nil {
+				return fmt.Errorf("failed to derive manifest for component %s: %w", component.CatalogEntryID, err)
+			}
+
 			newServer := withNeedsURL(v1.MCPServer{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: system.MCPServerPrefix,
@@ -953,7 +990,7 @@ func (h *Handler) EnsureCompositeComponents(req router.Request, _ router.Respons
 					Finalizers:   []string{v1.MCPServerFinalizer},
 				},
 				Spec: v1.MCPServerSpec{
-					Manifest:                  component.Manifest,
+					Manifest:                  componentManifest,
 					MCPServerCatalogEntryName: component.CatalogEntryID,
 					UserID:                    compositeServer.Spec.UserID,
 					CompositeName:             compositeServer.Name,
