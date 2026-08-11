@@ -1272,9 +1272,9 @@ func (h *MCPCatalogHandler) GenerateToolPreviewsOAuthURL(req api.Context) error 
 }
 
 // GenerateComponentToolPreviews generates tool previews for a single component of a composite
-// catalog entry using the manifest snapshot embedded in the composite entry. This is used by
-// the composite \"Configure Tools\" flow so that previews are based on the composite's
-// stored manifest, not on any newer version of the standalone MCP catalog entry.
+// catalog entry, using the catalog entry the component references. This is used by the composite
+// \"Configure Tools\" flow so the admin picks tool overrides against the component's current
+// tools.
 func (h *MCPCatalogHandler) GenerateComponentToolPreviews(req api.Context) error {
 	var (
 		catalogName = req.PathValue("catalog_id")

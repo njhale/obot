@@ -1355,10 +1355,7 @@ func TestEnsureCompositeComponentsDerivesNewComponentFromItsCatalogEntry(t *test
 		ServerUserType: types.ServerUserTypeSingleUser,
 		NPXConfig:      &types.NPXRuntimeConfig{Package: "@example/gmail@2.0.0"},
 	})
-	// The composite still carries an older snapshot of the component.
-	composite := newCompositeServer("composite", types.ComponentServer{
-		CatalogEntryID: entry.Name,
-	})
+	composite := newCompositeServer("composite", types.ComponentServer{CatalogEntryID: entry.Name})
 	c := newFakeClient(t, entry, composite)
 
 	require.NoError(t, ensureCompositeComponents(t, c, composite))
@@ -1367,7 +1364,7 @@ func TestEnsureCompositeComponentsDerivesNewComponentFromItsCatalogEntry(t *test
 	require.Len(t, children, 1)
 	require.NotNil(t, children[0].Spec.Manifest.NPXConfig)
 	assert.Equal(t, "@example/gmail@2.0.0", children[0].Spec.Manifest.NPXConfig.Package,
-		"a new component server must come from its catalog entry, not the composite's snapshot")
+		"a new component server must come from its catalog entry")
 	assert.Equal(t, entry.Name, children[0].Spec.MCPServerCatalogEntryName)
 	assert.Equal(t, composite.Name, children[0].Spec.CompositeName)
 	assert.Equal(t, "user-1", children[0].Spec.UserID)

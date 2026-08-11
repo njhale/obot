@@ -442,7 +442,7 @@ func TestResolveCompositeSourceRefsRejectsNestedCompositeComponent(t *testing.T)
 
 	result, errsBySourceURL := (&Handler{}).resolveCompositeSourceRefs(t.Context(), nil, "", "", []client.Object{inner, outer})
 
-	// The nested composite is rejected before it can be snapshotted, so the outer entry is skipped.
+	// The nested composite is rejected, so the outer entry is skipped rather than applied.
 	assert.Len(t, result, 1)
 	assert.Equal(t, "inner", result[0].GetName())
 	assert.Contains(t, errsBySourceURL["source"], "itself composite")
