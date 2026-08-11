@@ -174,6 +174,11 @@ type CompositeComponent struct {
 	// Unresolved reports that the reference did not point at a live source.
 	Unresolved bool `json:"unresolved,omitempty"`
 
+	// ToolOverridesStale reports that the component source's tool list changed since the
+	// composite's tool overrides for it were last set, so they may need to be revisited.
+	// Always false for a component with no tool overrides.
+	ToolOverridesStale bool `json:"toolOverridesStale,omitempty"`
+
 	// The fields below describe the per-user object materialized for this component and are
 	// only populated on MCPServer responses.
 	ServerID                string   `json:"serverID,omitempty"`
@@ -219,7 +224,6 @@ type MCPServerCatalogEntry struct {
 	ToolPreviewsLastGenerated *Time                         `json:"toolPreviewsLastGenerated,omitempty"`
 	PowerUserWorkspaceID      string                        `json:"powerUserWorkspaceID,omitempty"`
 	PowerUserID               string                        `json:"powerUserID,omitempty"`
-	NeedsUpdate               bool                          `json:"needsUpdate,omitempty"`
 	OAuthCredentialConfigured bool                          `json:"oauthCredentialConfigured,omitempty"`
 
 	// ConnectURL is the default URL clients can use to connect before configuring a personal server.

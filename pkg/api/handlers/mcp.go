@@ -234,13 +234,21 @@ func compositeComponentsForEntry(req api.Context, entry v1.MCPServerCatalogEntry
 
 	components := make([]types.CompositeComponent, 0, len(resolved))
 	for _, component := range resolved {
+		manifest := component.CatalogEntryManifest()
+
+		// The component's tool overrides were written against the tool list recorded when the
+		// composite was last configured for it. A source that has since published a different
+		// tool list may have renamed or removed a tool an override names.
+		observed, recorded := entry.Status.ObservedComponents[component.Ref.ComponentID()]
+
 		components = append(components, types.CompositeComponent{
-			CatalogEntryID: component.Ref.CatalogEntryID,
-			MCPServerID:    component.Ref.MCPServerID,
-			ToolPrefix:     component.Ref.ToolPrefix,
-			ToolOverrides:  component.Ref.ToolOverrides,
-			Manifest:       component.CatalogEntryManifest(),
-			Unresolved:     component.Unresolved(),
+			CatalogEntryID:     component.Ref.CatalogEntryID,
+			MCPServerID:        component.Ref.MCPServerID,
+			ToolPrefix:         component.Ref.ToolPrefix,
+			ToolOverrides:      component.Ref.ToolOverrides,
+			Manifest:           manifest,
+			Unresolved:         component.Unresolved(),
+			ToolOverridesStale: recorded && observed.SourceToolsHash != utils.Digest(manifest.ToolPreview),
 		})
 	}
 
@@ -263,7 +271,6 @@ func ConvertMCPServerCatalogEntryWithWorkspace(entry v1.MCPServerCatalogEntry, p
 		ToolPreviewsLastGenerated: v1.NewTime(entry.Status.ToolPreviewsLastGenerated),
 		PowerUserWorkspaceID:      powerUserWorkspaceID,
 		PowerUserID:               powerUserID,
-		NeedsUpdate:               entry.Status.NeedsUpdate,
 		OAuthCredentialConfigured: entry.Status.OAuthCredentialConfigured,
 		ConnectURL:                defaultCatalogEntryConnectURL(serverURL, entry),
 		Components:                components,

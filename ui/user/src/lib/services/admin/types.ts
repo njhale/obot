@@ -751,7 +751,6 @@ export interface MCPCatalogEntry {
 	powerUserID?: string;
 	powerUserWorkspaceID?: string;
 	isCatalogEntry: boolean;
-	needsUpdate?: boolean;
 	canConnect?: boolean;
 	needsK8sUpdate?: boolean;
 	oauthCredentialConfigured?: boolean;

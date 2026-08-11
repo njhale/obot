@@ -7,217 +7,13 @@ import (
 	"github.com/obot-platform/obot/apiclient/types"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	storagescheme "github.com/obot-platform/obot/pkg/storage/scheme"
+	"github.com/obot-platform/obot/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
-
-func TestDetectCompositeDriftMarksEntryNeedingUpdateWhenMultiUserComponentDrifts(t *testing.T) {
-	componentSnapshot := types.MCPServerCatalogEntryManifest{
-		Name:           "Shared Component",
-		Runtime:        types.RuntimeContainerized,
-		ServerUserType: types.ServerUserTypeMultiUser,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-	}
-	compositeEntry := newMCPServerCatalogEntry("composite-entry", types.MCPServerCatalogEntryManifest{
-		Name:    "Composite Entry",
-		Runtime: types.RuntimeComposite,
-		CompositeConfig: &types.CompositeCatalogConfig{
-			ComponentServers: []types.CatalogComponentServer{
-				{
-					MCPServerID: "shared-server",
-					Manifest:    componentSnapshot,
-				},
-			},
-		},
-	})
-	sharedServer := newMCPServer("shared-server", types.MCPServerManifest{
-		Name:    "Shared Component",
-		Runtime: types.RuntimeContainerized,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:2.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-	})
-
-	client := newFakeClient(compositeEntry, sharedServer)
-	err := (&Handler{}).DetectCompositeDrift(router.Request{
-		Client:    client,
-		Ctx:       t.Context(),
-		Object:    compositeEntry,
-		Namespace: compositeEntry.Namespace,
-		Name:      compositeEntry.Name,
-	}, &router.ResponseWrapper{})
-	require.NoError(t, err)
-
-	var updated v1.MCPServerCatalogEntry
-	require.NoError(t, client.Get(t.Context(), router.Key(compositeEntry.Namespace, compositeEntry.Name), &updated))
-	assert.True(t, updated.Status.NeedsUpdate)
-}
-
-func TestDetectCompositeDriftIgnoresCatalogOnlyComponentFields(t *testing.T) {
-	componentSnapshot := types.MCPServerCatalogEntryManifest{
-		Name:    "Catalog Component",
-		Runtime: types.RuntimeContainerized,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-	}
-	compositeEntry := newMCPServerCatalogEntry("composite-entry", types.MCPServerCatalogEntryManifest{
-		Name:    "Composite Entry",
-		Runtime: types.RuntimeComposite,
-		CompositeConfig: &types.CompositeCatalogConfig{
-			ComponentServers: []types.CatalogComponentServer{{
-				CatalogEntryID: "component-entry",
-				Manifest:       componentSnapshot,
-			}},
-		},
-	})
-	compositeEntry.Status.NeedsUpdate = true
-	componentEntry := newMCPServerCatalogEntry("component-entry", types.MCPServerCatalogEntryManifest{
-		EntryKey:       "catalog-only-entry-key",
-		Name:           "Catalog Component",
-		Runtime:        types.RuntimeContainerized,
-		ServerUserType: types.ServerUserTypeSingleUser,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-	})
-
-	client := newFakeClient(compositeEntry, componentEntry)
-	err := (&Handler{}).DetectCompositeDrift(router.Request{
-		Client:    client,
-		Ctx:       t.Context(),
-		Object:    compositeEntry,
-		Namespace: compositeEntry.Namespace,
-		Name:      compositeEntry.Name,
-	}, &router.ResponseWrapper{})
-	require.NoError(t, err)
-
-	var updated v1.MCPServerCatalogEntry
-	require.NoError(t, client.Get(t.Context(), router.Key(compositeEntry.Namespace, compositeEntry.Name), &updated))
-	assert.False(t, updated.Status.NeedsUpdate)
-}
-
-func TestDetectCompositeDriftIgnoresAdminAddedSecretBindings(t *testing.T) {
-	binding := &types.MCPSecretBinding{Name: "admin-secret", Key: "api-key", AdminAdded: true}
-	componentSnapshot := types.MCPServerCatalogEntryManifest{
-		Name:           "Shared Component",
-		Runtime:        types.RuntimeContainerized,
-		ServerUserType: types.ServerUserTypeMultiUser,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-		Env: []types.MCPEnv{{MCPHeader: types.MCPHeader{
-			Key:       "API_KEY",
-			Name:      "API Key",
-			Required:  true,
-			Sensitive: true,
-		}}},
-	}
-	compositeEntry := newMCPServerCatalogEntry("composite-entry", types.MCPServerCatalogEntryManifest{
-		Name:    "Composite Entry",
-		Runtime: types.RuntimeComposite,
-		CompositeConfig: &types.CompositeCatalogConfig{
-			ComponentServers: []types.CatalogComponentServer{{
-				MCPServerID: "shared-server",
-				Manifest:    componentSnapshot,
-			}},
-		},
-	})
-	compositeEntry.Status.NeedsUpdate = true
-	sharedServer := newMCPServer("shared-server", types.MCPServerManifest{
-		Name:    "Shared Component",
-		Runtime: types.RuntimeContainerized,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-		Env: []types.MCPEnv{{MCPHeader: types.MCPHeader{
-			Key:           "API_KEY",
-			Name:          "API Key",
-			Required:      true,
-			Sensitive:     true,
-			SecretBinding: binding,
-		}}},
-	})
-	client := newFakeClient(compositeEntry, sharedServer)
-	err := (&Handler{}).DetectCompositeDrift(router.Request{
-		Client:    client,
-		Ctx:       t.Context(),
-		Object:    compositeEntry,
-		Namespace: compositeEntry.Namespace,
-		Name:      compositeEntry.Name,
-	}, &router.ResponseWrapper{})
-	require.NoError(t, err)
-
-	var updated v1.MCPServerCatalogEntry
-	require.NoError(t, client.Get(t.Context(), router.Key(compositeEntry.Namespace, compositeEntry.Name), &updated))
-	assert.False(t, updated.Status.NeedsUpdate)
-}
-
-func TestDetectCompositeDriftClearsEntryWhenMultiUserComponentMatches(t *testing.T) {
-	componentSnapshot := types.MCPServerCatalogEntryManifest{
-		Name:           "Shared Component",
-		Runtime:        types.RuntimeContainerized,
-		ServerUserType: types.ServerUserTypeMultiUser,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-	}
-	compositeEntry := newMCPServerCatalogEntry("composite-entry", types.MCPServerCatalogEntryManifest{
-		Name:    "Composite Entry",
-		Runtime: types.RuntimeComposite,
-		CompositeConfig: &types.CompositeCatalogConfig{
-			ComponentServers: []types.CatalogComponentServer{
-				{
-					MCPServerID: "shared-server",
-					Manifest:    componentSnapshot,
-				},
-			},
-		},
-	})
-	compositeEntry.Status.NeedsUpdate = true
-	sharedServer := newMCPServer("shared-server", types.MCPServerManifest{
-		Name:    "Shared Component",
-		Runtime: types.RuntimeContainerized,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-	})
-
-	client := newFakeClient(compositeEntry, sharedServer)
-	err := (&Handler{}).DetectCompositeDrift(router.Request{
-		Client:    client,
-		Ctx:       t.Context(),
-		Object:    compositeEntry,
-		Namespace: compositeEntry.Namespace,
-		Name:      compositeEntry.Name,
-	}, &router.ResponseWrapper{})
-	require.NoError(t, err)
-
-	var updated v1.MCPServerCatalogEntry
-	require.NoError(t, client.Get(t.Context(), router.Key(compositeEntry.Namespace, compositeEntry.Name), &updated))
-	assert.False(t, updated.Status.NeedsUpdate)
-}
 
 func newFakeClient(objects ...kclient.Object) kclient.WithWatch {
 	return fake.NewClientBuilder().
@@ -248,6 +44,153 @@ func newMCPServerCatalogEntry(name string, manifest types.MCPServerCatalogEntryM
 			Manifest: manifest,
 		},
 	}
+}
+
+func newCompositeEntry(name string, components ...types.CatalogComponentServer) *v1.MCPServerCatalogEntry {
+	return newMCPServerCatalogEntry(name, types.MCPServerCatalogEntryManifest{
+		Name:            "Composite",
+		Runtime:         types.RuntimeComposite,
+		ServerUserType:  types.ServerUserTypeSingleUser,
+		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: components},
+	})
+}
+
+func newComponentEntry(name string, tools ...string) *v1.MCPServerCatalogEntry {
+	toolPreview := make([]types.MCPServerTool, 0, len(tools))
+	for _, tool := range tools {
+		toolPreview = append(toolPreview, types.MCPServerTool{Name: tool})
+	}
+
+	return newMCPServerCatalogEntry(name, types.MCPServerCatalogEntryManifest{
+		Name:           "Component",
+		Runtime:        types.RuntimeNPX,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "@example/component"},
+		ToolPreview:    toolPreview,
+	})
+}
+
+func observeComponents(t *testing.T, client kclient.WithWatch, entry *v1.MCPServerCatalogEntry) v1.MCPServerCatalogEntry {
+	t.Helper()
+
+	require.NoError(t, (&Handler{}).EnsureObservedComponents(router.Request{
+		Client:    client,
+		Ctx:       t.Context(),
+		Object:    entry,
+		Namespace: entry.Namespace,
+		Name:      entry.Name,
+	}, &router.ResponseWrapper{}))
+
+	var updated v1.MCPServerCatalogEntry
+	require.NoError(t, client.Get(t.Context(), router.Key(entry.Namespace, entry.Name), &updated))
+	return updated
+}
+
+func TestEnsureObservedComponentsRecordsSourceToolsForOverriddenComponents(t *testing.T) {
+	component := newComponentEntry("component", "search", "fetch")
+	composite := newCompositeEntry("composite", types.CatalogComponentServer{
+		CatalogEntryID: component.Name,
+		ToolOverrides:  []types.ToolOverride{{Name: "search", Enabled: true}},
+	})
+
+	client := newFakeClient(composite, component)
+	updated := observeComponents(t, client, composite)
+
+	recorded, ok := updated.Status.ObservedComponents[component.Name]
+	require.True(t, ok, "component with tool overrides should be recorded")
+	assert.NotEmpty(t, recorded.ToolOverridesHash)
+	assert.NotEmpty(t, recorded.SourceToolsHash)
+}
+
+func TestEnsureObservedComponentsIgnoresComponentsWithoutOverrides(t *testing.T) {
+	component := newComponentEntry("component", "search")
+	composite := newCompositeEntry("composite", types.CatalogComponentServer{
+		CatalogEntryID: component.Name,
+		ToolPrefix:     "c_",
+	})
+
+	client := newFakeClient(composite, component)
+	updated := observeComponents(t, client, composite)
+
+	assert.Empty(t, updated.Status.ObservedComponents, "nothing can go stale without tool overrides")
+}
+
+func TestEnsureObservedComponentsKeepsRecordingWhenSourceToolsChange(t *testing.T) {
+	component := newComponentEntry("component", "search", "fetch")
+	composite := newCompositeEntry("composite", types.CatalogComponentServer{
+		CatalogEntryID: component.Name,
+		ToolOverrides:  []types.ToolOverride{{Name: "search", Enabled: true}},
+	})
+
+	client := newFakeClient(composite, component)
+	original := observeComponents(t, client, composite)
+
+	// The source drops the tool the override names. The recording must not follow it, or the
+	// overrides would never read as stale.
+	component.Spec.Manifest.ToolPreview = []types.MCPServerTool{{Name: "fetch"}}
+	require.NoError(t, client.Update(t.Context(), component))
+
+	updated := observeComponents(t, client, &original)
+	assert.Equal(t, original.Status.ObservedComponents, updated.Status.ObservedComponents)
+	assert.NotEqual(t,
+		utils.Digest(component.Spec.Manifest.ToolPreview),
+		updated.Status.ObservedComponents[component.Name].SourceToolsHash,
+		"recorded tool list should still describe the source as it was when the overrides were set")
+}
+
+func TestEnsureObservedComponentsRebaselinesWhenOverridesAreReset(t *testing.T) {
+	component := newComponentEntry("component", "search", "fetch")
+	composite := newCompositeEntry("composite", types.CatalogComponentServer{
+		CatalogEntryID: component.Name,
+		ToolOverrides:  []types.ToolOverride{{Name: "search", Enabled: true}},
+	})
+
+	client := newFakeClient(composite, component)
+	original := observeComponents(t, client, composite)
+
+	component.Spec.Manifest.ToolPreview = []types.MCPServerTool{{Name: "fetch"}}
+	require.NoError(t, client.Update(t.Context(), component))
+
+	// The admin revisits the overrides against the source's current tools.
+	reset := original.DeepCopy()
+	reset.Spec.Manifest.CompositeConfig.ComponentServers[0].ToolOverrides = []types.ToolOverride{
+		{Name: "fetch", Enabled: true},
+	}
+	require.NoError(t, client.Update(t.Context(), reset))
+
+	updated := observeComponents(t, client, reset)
+	assert.Equal(t,
+		utils.Digest(component.Spec.Manifest.ToolPreview),
+		updated.Status.ObservedComponents[component.Name].SourceToolsHash)
+}
+
+func TestEnsureObservedComponentsKeepsRecordingForUnresolvableSource(t *testing.T) {
+	component := newComponentEntry("component", "search")
+	composite := newCompositeEntry("composite", types.CatalogComponentServer{
+		CatalogEntryID: component.Name,
+		ToolOverrides:  []types.ToolOverride{{Name: "search", Enabled: true}},
+	})
+
+	client := newFakeClient(composite, component)
+	original := observeComponents(t, client, composite)
+
+	require.NoError(t, client.Delete(t.Context(), component))
+
+	updated := observeComponents(t, client, &original)
+	assert.Equal(t, original.Status.ObservedComponents, updated.Status.ObservedComponents,
+		"a source that is gone should not re-baseline the recording")
+}
+
+func TestEnsureObservedComponentsClearsRecordingForNonComposite(t *testing.T) {
+	entry := newComponentEntry("entry", "search")
+	entry.Status.ObservedComponents = map[string]v1.ObservedComponent{
+		"stale": {ToolOverridesHash: "a", SourceToolsHash: "b"},
+	}
+
+	client := newFakeClient(entry)
+	updated := observeComponents(t, client, entry)
+
+	assert.Nil(t, updated.Status.ObservedComponents)
 }
 
 func TestEnsureUserCountMultiUserEntry(t *testing.T) {

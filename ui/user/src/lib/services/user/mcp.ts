@@ -352,7 +352,6 @@ export function convertEntriesToTableData(
 				registry,
 				source,
 				sourceType,
-				needsUpdate: entry.needsUpdate,
 				connected,
 				connectedAt: configuredServers[0]?.created,
 				missingKubernetesSecret: missingSecretBinding,

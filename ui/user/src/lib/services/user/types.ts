@@ -650,6 +650,8 @@ export interface CompositeComponent {
 
 	manifest?: MCPServer;
 	unresolved?: boolean;
+	/** The component's tool list changed since this composite's tool overrides for it were set. */
+	toolOverridesStale?: boolean;
 
 	/** Set on composite MCP server responses only. */
 	serverID?: string;

@@ -298,19 +298,11 @@
 					root: 'rounded-none rounded-b-md shadow-none',
 					thead: classes?.tableHeader
 				}}
-				setRowClasses={(d) => {
-					const missingSecretBinding = 'missingKubernetesSecret' in d && d.missingKubernetesSecret;
-					return (d.data.needsUpdate && !missingSecretBinding) ||
-						deploymentsNeedingAttentionByCatalogEntry.has(d.data.id)
-						? 'bg-primary/10'
-						: '';
-				}}
+				setRowClasses={(d) =>
+					deploymentsNeedingAttentionByCatalogEntry.has(d.data.id) ? 'bg-primary/10' : ''}
 			>
 				{#snippet onRenderColumn(property, d)}
-					{@const attentionRequired =
-						(d.data.needsUpdate &&
-							!('missingKubernetesSecret' in d && d.missingKubernetesSecret)) ||
-						deploymentsNeedingAttentionByCatalogEntry.has(d.data.id)}
+					{@const attentionRequired = deploymentsNeedingAttentionByCatalogEntry.has(d.data.id)}
 					{@const deprecated = isDeprecatedMCPServer(d.data)}
 					{@const tunnelDisconnected = isMcpTunnelDisconnected(
 						d.data,

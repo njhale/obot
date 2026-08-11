@@ -499,6 +499,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.OAuthTokenList{}.OpenAPIModelName():                                                    schema_storage_apis_obotobotai_v1_OAuthTokenList(ref),
 		v1.OAuthTokenSpec{}.OpenAPIModelName():                                                    schema_storage_apis_obotobotai_v1_OAuthTokenSpec(ref),
 		v1.OAuthTokenStatus{}.OpenAPIModelName():                                                  schema_storage_apis_obotobotai_v1_OAuthTokenStatus(ref),
+		v1.ObservedComponent{}.OpenAPIModelName():                                                 schema_storage_apis_obotobotai_v1_ObservedComponent(ref),
 		v1.OktaGroupMigration{}.OpenAPIModelName():                                                schema_storage_apis_obotobotai_v1_OktaGroupMigration(ref),
 		v1.OktaGroupMigrationList{}.OpenAPIModelName():                                            schema_storage_apis_obotobotai_v1_OktaGroupMigrationList(ref),
 		v1.OktaGroupMigrationSpec{}.OpenAPIModelName():                                            schema_storage_apis_obotobotai_v1_OktaGroupMigrationSpec(ref),
@@ -3212,6 +3213,13 @@ func schema_obot_platform_obot_apiclient_types_CompositeComponent(ref common.Ref
 					"unresolved": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Unresolved reports that the reference did not point at a live source.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"toolOverridesStale": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ToolOverridesStale reports that the component source's tool list changed since the composite's tool overrides for it were last set, so they may need to be revisited. Always false for a component with no tool overrides.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
@@ -10516,12 +10524,6 @@ func schema_obot_platform_obot_apiclient_types_MCPServerCatalogEntry(ref common.
 					"powerUserID": {
 						SchemaProps: spec.SchemaProps{
 							Type:   []string{"string"},
-							Format: "",
-						},
-					},
-					"needsUpdate": {
-						SchemaProps: spec.SchemaProps{
-							Type:   []string{"boolean"},
 							Format: "",
 						},
 					},
@@ -21851,11 +21853,18 @@ func schema_storage_apis_obotobotai_v1_MCPServerCatalogEntryStatus(ref common.Re
 							Format:      "",
 						},
 					},
-					"needsUpdate": {
+					"observedComponents": {
 						SchemaProps: spec.SchemaProps{
-							Description: "NeedsUpdate indicates whether this composite catalog entry's component snapshots have drifted from their sources.",
-							Type:        []string{"boolean"},
-							Format:      "",
+							Description: "ObservedComponents records, keyed by component ID, what was seen for each component of a composite entry the last time this entry's configuration for that component changed. Only components with tool overrides are recorded.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1.ObservedComponent{}.OpenAPIModelName()),
+									},
+								},
+							},
 						},
 					},
 					"oauthCredentialConfigured": {
@@ -21869,7 +21878,7 @@ func schema_storage_apis_obotobotai_v1_MCPServerCatalogEntryStatus(ref common.Re
 			},
 		},
 		Dependencies: []string{
-			metav1.Time{}.OpenAPIModelName()},
+			v1.ObservedComponent{}.OpenAPIModelName(), metav1.Time{}.OpenAPIModelName()},
 	}
 }
 
@@ -24686,6 +24695,33 @@ func schema_storage_apis_obotobotai_v1_OAuthTokenStatus(ref common.ReferenceCall
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
 				Type: []string{"object"},
+			},
+		},
+	}
+}
+
+func schema_storage_apis_obotobotai_v1_ObservedComponent(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ObservedComponent records what was seen for one component of a composite catalog entry the last time the composite's tool overrides for that component were set. Comparing SourceToolsHash against the component source's current tool list reports whether those overrides may have gone stale, since an override names a tool the source can rename or drop.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"toolOverridesHash": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ToolOverridesHash is a hash of the composite's tool overrides for the component. A change to it means the overrides were re-set against the source's tool list as it stood then.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"sourceToolsHash": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SourceToolsHash is a hash of the component source's tool list at that time.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
 			},
 		},
 	}

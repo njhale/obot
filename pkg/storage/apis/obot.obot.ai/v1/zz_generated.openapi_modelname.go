@@ -731,6 +731,11 @@ func (in OAuthTokenStatus) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ObservedComponent) OpenAPIModelName() string {
+	return "com.github.obot-platform.obot.pkg.storage.apis.obot.obot.ai.v1.ObservedComponent"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in OktaGroupMigration) OpenAPIModelName() string {
 	return "com.github.obot-platform.obot.pkg.storage.apis.obot.obot.ai.v1.OktaGroupMigration"
 }

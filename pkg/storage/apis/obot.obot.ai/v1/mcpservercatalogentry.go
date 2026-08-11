@@ -95,11 +95,25 @@ type MCPServerCatalogEntryStatus struct {
 	ToolPreviewsLastGenerated *metav1.Time `json:"toolPreviewsLastGenerated,omitempty"`
 	// ManifestHash is a SHA256 hash of the catalog entry configuration used to detect changes.
 	ManifestHash string `json:"manifestHash,omitempty"`
-	// NeedsUpdate indicates whether this composite catalog entry's component snapshots have drifted from their sources.
-	NeedsUpdate bool `json:"needsUpdate,omitempty"`
+	// ObservedComponents records, keyed by component ID, what was seen for each component of a
+	// composite entry the last time this entry's configuration for that component changed.
+	// Only components with tool overrides are recorded.
+	ObservedComponents map[string]ObservedComponent `json:"observedComponents,omitempty"`
 	// OAuthCredentialConfigured indicates whether OAuth credentials have been configured for this remote catalog entry.
 	// Only relevant when Runtime is "remote" and RemoteConfig.StaticOAuthRequired is true.
 	OAuthCredentialConfigured bool `json:"oauthCredentialConfigured,omitempty"`
+}
+
+// ObservedComponent records what was seen for one component of a composite catalog entry the
+// last time the composite's tool overrides for that component were set. Comparing SourceToolsHash
+// against the component source's current tool list reports whether those overrides may have gone
+// stale, since an override names a tool the source can rename or drop.
+type ObservedComponent struct {
+	// ToolOverridesHash is a hash of the composite's tool overrides for the component. A change
+	// to it means the overrides were re-set against the source's tool list as it stood then.
+	ToolOverridesHash string `json:"toolOverridesHash,omitempty"`
+	// SourceToolsHash is a hash of the component source's tool list at that time.
+	SourceToolsHash string `json:"sourceToolsHash,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

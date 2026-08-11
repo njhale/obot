@@ -3,17 +3,17 @@ package mcpservercatalogentry
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/obot-platform/nah/pkg/router"
 	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/logger"
-	"github.com/obot-platform/obot/pkg/controller/handlers/mcpserver"
 	gclient "github.com/obot-platform/obot/pkg/gateway/client"
+	"github.com/obot-platform/obot/pkg/mcp"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	"github.com/obot-platform/obot/pkg/utils"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -137,80 +137,65 @@ func (*Handler) UpdateSystemManifestHashAndLastUpdated(req router.Request, _ rou
 	return nil
 }
 
-// DetectCompositeDrift detects when a composite catalog entry's component snapshots have drifted
-// from their source catalog entries or multi-user servers
-func (h *Handler) DetectCompositeDrift(req router.Request, _ router.Response) error {
+// EnsureObservedComponents records the tool list of each component source of a composite catalog
+// entry at the moment the composite's configuration for that component changes. Comparing a
+// recorded tool list against the source's current one is what lets a reader report that the
+// composite's tool overrides for a component may have gone stale.
+//
+// Only components carrying tool overrides are recorded; there is nothing to go stale otherwise.
+func (*Handler) EnsureObservedComponents(req router.Request, _ router.Response) error {
 	entry := req.Object.(*v1.MCPServerCatalogEntry)
 
-	if entry.Spec.Manifest.Runtime != types.RuntimeComposite {
-		if entry.Status.NeedsUpdate {
-			entry.Status.NeedsUpdate = false
-			return req.Client.Status().Update(req.Ctx, entry)
+	var components []types.CatalogComponentServer
+	if entry.Spec.Manifest.Runtime == types.RuntimeComposite && entry.Spec.Manifest.CompositeConfig != nil {
+		components = entry.Spec.Manifest.CompositeConfig.ComponentServers
+	}
+
+	resolved, err := mcp.ResolveComponents(req.Ctx, req.Client, entry.Namespace, components)
+	if err != nil {
+		return err
+	}
+
+	observed := make(map[string]v1.ObservedComponent, len(resolved))
+	for _, component := range resolved {
+		id := component.Ref.ComponentID()
+		if id == "" || len(component.Ref.ToolOverrides) == 0 {
+			continue
 		}
+
+		if component.Unresolved() {
+			// Carry any recording forward rather than re-baselining against a source that may
+			// only be transiently unresolvable.
+			if previous, ok := entry.Status.ObservedComponents[id]; ok {
+				observed[id] = previous
+			}
+			continue
+		}
+
+		// Carry the recording forward while the overrides are unchanged, so a source that
+		// changes its tools after they were set still reads as stale.
+		overridesHash := utils.Digest(component.Ref.ToolOverrides)
+		if previous, ok := entry.Status.ObservedComponents[id]; ok && previous.ToolOverridesHash == overridesHash {
+			observed[id] = previous
+			continue
+		}
+
+		observed[id] = v1.ObservedComponent{
+			ToolOverridesHash: overridesHash,
+			SourceToolsHash:   utils.Digest(component.CatalogEntryManifest().ToolPreview),
+		}
+	}
+
+	if len(observed) == 0 {
+		observed = nil
+	}
+	if maps.Equal(entry.Status.ObservedComponents, observed) {
 		return nil
 	}
 
-	// Check each component for drift
-	var drifted bool
-	for _, component := range entry.Spec.Manifest.CompositeConfig.ComponentServers {
-		// Handle multi-user component drift
-		if component.MCPServerID != "" {
-			var server v1.MCPServer
-			if err := req.Get(&server, entry.Namespace, component.MCPServerID); err != nil {
-				if apierrors.IsNotFound(err) {
-					drifted = true
-					break
-				}
-				return fmt.Errorf("failed to get multi-user server %s: %w", component.MCPServerID, err)
-			}
-
-			hasDrifted, err := mcpserver.ConfigurationHasDrifted(req.Ctx, h.gatewayClient, &server, component.Manifest, false)
-			if err != nil {
-				return fmt.Errorf("failed to detect drift for multi-user server %s: %w", component.MCPServerID, err)
-			}
-			if hasDrifted {
-				drifted = true
-				break
-			}
-		} else {
-			// Handle catalog entry component drift
-			var componentEntry v1.MCPServerCatalogEntry
-			if err := req.Get(&componentEntry, entry.Namespace, component.CatalogEntryID); err != nil {
-				if apierrors.IsNotFound(err) {
-					drifted = true
-					break
-				}
-				return fmt.Errorf("failed to get component catalog entry %s: %w", component.CatalogEntryID, err)
-			}
-
-			// We added the EntryKey field, but it really shouldn't affect drift detection here.
-			if component.Manifest.EntryKey == "" && componentEntry.Spec.Manifest.EntryKey != "" {
-				component.Manifest.EntryKey = componentEntry.Spec.Manifest.EntryKey
-			}
-
-			// Same for serverUserType
-			if component.Manifest.ServerUserType == "" && componentEntry.Spec.Manifest.ServerUserType != "" {
-				component.Manifest.ServerUserType = componentEntry.Spec.Manifest.ServerUserType
-			}
-
-			var (
-				snapshotHash = utils.Digest(component.Manifest)
-				currentHash  = utils.Digest(componentEntry.Spec.Manifest)
-			)
-			if snapshotHash != currentHash {
-				drifted = true
-				break
-			}
-		}
-	}
-
-	if entry.Status.NeedsUpdate != drifted {
-		log.Infof("MCP catalog entry composite drift status changed: entry=%s needsUpdate=%v", entry.Name, drifted)
-		entry.Status.NeedsUpdate = drifted
-		return req.Client.Status().Update(req.Ctx, entry)
-	}
-
-	return nil
+	log.Infof("Updated observed composite components: entry=%s components=%d", entry.Name, len(observed))
+	entry.Status.ObservedComponents = observed
+	return req.Client.Status().Update(req.Ctx, entry)
 }
 
 // CleanupNestedCompositeServers removes component servers with composite runtimes from composite catalog entries.
