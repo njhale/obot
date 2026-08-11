@@ -16,6 +16,7 @@
 		type MCPCatalog,
 		type MCPCatalogEntry,
 		type MCPCatalogServer,
+		type CompositeReference,
 		type OrgUser,
 		MCPCompositeDeletionDependencyError,
 		type MCPServerInstance,
@@ -94,6 +95,34 @@
 	}: Props = $props();
 
 	let deletingEntry = $state<MCPCatalogEntry>();
+	// Composites that use the entry being deleted as one of their components. Deleting it is
+	// still allowed; the components simply disappear from those composites.
+	let deletingEntryUsedBy = $state<CompositeReference[]>([]);
+	let deletingEntryUsedByNote = $derived.by(() => {
+		if (deletingEntryUsedBy.length === 0) return undefined;
+		const inUse = deletingEntryUsedBy.filter((c) => c.inUse);
+		const names = deletingEntryUsedBy.map((c) => c.name || c.id).join(', ');
+		const deployed =
+			inUse.length > 0
+				? ` ${inUse.length} of them ${inUse.length === 1 ? 'has' : 'have'} servers deployed.`
+				: '';
+		return `It is a component of ${deletingEntryUsedBy.length} composite ${
+			deletingEntryUsedBy.length === 1 ? 'entry' : 'entries'
+		}: ${names}. It will be removed from ${
+			deletingEntryUsedBy.length === 1 ? 'it' : 'them'
+		}.${deployed}`;
+	});
+
+	async function beginDeleteEntry(entry?: MCPCatalogEntry) {
+		deletingEntry = entry;
+		deletingEntryUsedBy = [];
+		if (!entry || entry.powerUserWorkspaceID || !catalog) return;
+		try {
+			deletingEntryUsedBy = await AdminService.listMCPCatalogEntryUsedBy(catalog.id, entry.id);
+		} catch (_err) {
+			// A failed lookup only costs the warning, so let the delete proceed without it.
+		}
+	}
 	let deletingServer = $state<MCPCatalogServer>();
 	let selected = $state<Record<string, Item>>({});
 	let confirmBulkDelete = $state(false);
@@ -472,7 +501,7 @@
 										class="menu-button-destructive"
 										onclick={(e) => {
 											e.stopPropagation();
-											deletingEntry = catalogEntry;
+											beginDeleteEntry(catalogEntry);
 											toggle(false);
 										}}
 									>
@@ -492,6 +521,7 @@
 <McpConfirmDelete
 	names={[deletingEntry?.manifest?.name ?? '']}
 	show={Boolean(deletingEntry)}
+	additionalNote={deletingEntryUsedByNote}
 	onsuccess={async () => {
 		if (!deletingEntry) {
 			return;
@@ -508,8 +538,12 @@
 
 		await fetch();
 		deletingEntry = undefined;
+		deletingEntryUsedBy = [];
 	}}
-	oncancel={() => (deletingEntry = undefined)}
+	oncancel={() => {
+		deletingEntry = undefined;
+		deletingEntryUsedBy = [];
+	}}
 	entity="entry"
 	entityPlural="entries"
 />

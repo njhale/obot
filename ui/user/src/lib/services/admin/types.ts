@@ -704,6 +704,16 @@ export interface RemoteCatalogConfigAdmin {
 	tunnelName?: string;
 	urlTemplate?: string;
 }
+/**
+ * A composite catalog entry that uses another entry or multi-user server as one of its
+ * components. Returned by the used-by endpoint so a delete can be warned about first.
+ */
+export interface CompositeReference {
+	id: string;
+	name: string;
+	userCount?: number;
+	inUse?: boolean;
+}
 export interface CompositeCatalogConfig {
 	componentServers: CatalogComponentServer[];
 }

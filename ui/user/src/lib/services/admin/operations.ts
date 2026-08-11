@@ -69,6 +69,7 @@ import type {
 	GroupRoleAssignmentList,
 	MCPCapacityInfo,
 	MCPServerOAuthCredentialRequest,
+	CompositeReference,
 	MCPServerOAuthCredentialStatus,
 	TokenUsageTimeRange,
 	TotalTokenUsage,
@@ -892,6 +893,19 @@ export async function acceptMCPCatalogEntryOwnership(
 
 export async function deleteMCPCatalogEntry(catalogID: string, entryID: string): Promise<void> {
 	await doDelete(`/mcp-catalogs/${catalogID}/entries/${entryID}`);
+}
+
+/** Composite catalog entries that use this entry as one of their components. */
+export async function listMCPCatalogEntryUsedBy(
+	catalogID: string,
+	entryID: string,
+	opts?: { fetch?: Fetcher }
+): Promise<CompositeReference[]> {
+	const response = (await doGet(`/mcp-catalogs/${catalogID}/entries/${entryID}/used-by`, {
+		...opts,
+		dontLogErrors: true
+	})) as { items: CompositeReference[] };
+	return response.items ?? [];
 }
 
 export async function getMCPCatalogEntryOAuthCredentials(
