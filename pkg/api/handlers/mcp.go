@@ -7,7 +7,6 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -37,12 +36,7 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var envVarRegex = regexp.MustCompile(`\${([^}]+)}`)
-
-const (
-	requestTimeUpdateInterval = 15 * time.Minute
-	configURLKey              = "__url"
-)
+const configURLKey = "__url"
 
 // MCPOAuthChecker will check the OAuth status for an MCP server. This interface breaks an import cycle.
 type MCPOAuthChecker interface {
@@ -271,7 +265,7 @@ func compositeComponentsForEntry(req api.Context, entry v1.MCPServerCatalogEntry
 
 func ConvertMCPServerCatalogEntryWithWorkspace(entry v1.MCPServerCatalogEntry, powerUserWorkspaceID, powerUserID, serverURL string, components ...types.CompositeComponent) types.MCPServerCatalogEntry {
 	// Add extracted env vars directly to the entry
-	addExtractedEnvVarsToCatalogEntry(&entry)
+	mcp.AddExtractedEnvVarsToCatalogEntry(&entry)
 
 	return types.MCPServerCatalogEntry{
 		Metadata:                  MetadataFrom(&entry),
@@ -400,7 +394,7 @@ func (m *MCPHandler) ListServer(req api.Context) error {
 		}
 
 		// Add extracted env vars to the server definition
-		addExtractedEnvVars(&server)
+		mcp.AddExtractedEnvVars(&server)
 
 		slug, err := SlugForMCPServer(req.Context(), req.Storage, server, req.User.GetUID(), catalogID, workspaceID)
 		if err != nil {
@@ -446,7 +440,7 @@ func (m *MCPHandler) GetServer(req api.Context) error {
 	}
 
 	// Add extracted env vars to the server definition
-	addExtractedEnvVars(&server)
+	mcp.AddExtractedEnvVars(&server)
 
 	var credCtxs []string
 	if catalogID != "" {
@@ -503,7 +497,7 @@ func (m *MCPHandler) DeleteServer(req api.Context) error {
 	}
 
 	// Add extracted env vars to the server definition
-	addExtractedEnvVars(&server)
+	mcp.AddExtractedEnvVars(&server)
 
 	slug, err := SlugForMCPServer(req.Context(), req.Storage, server, req.User.GetUID(), catalogID, workspaceID)
 	if err != nil {
@@ -1106,7 +1100,7 @@ func mcpServerOrInstanceFromConnectURL(req api.Context, id, secretBindingAllowed
 		if err := req.Get(&entry, id); err != nil {
 			return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrNotFound("catalog entry %s not found", id)
 		}
-		addExtractedEnvVarsToCatalogEntry(&entry)
+		mcp.AddExtractedEnvVarsToCatalogEntry(&entry)
 
 		// List the MCP servers for the user and take the first one.
 		var servers v1.MCPServerList
@@ -1131,8 +1125,8 @@ func mcpServerOrInstanceFromConnectURL(req api.Context, id, secretBindingAllowed
 			}
 
 			// Convert the catalog entry manifest to a server manifest. Treat the user as non-admin always.
-			allowMissingURL := catalogEntryRequiresUserURL(entry.Spec.Manifest)
-			manifest, err := serverManifestFromCatalogEntryManifest(false, allowMissingURL, entry.Spec.Manifest, types.MCPServerManifest{})
+			allowMissingURL := mcp.CatalogEntryRequiresUserURL(entry.Spec.Manifest)
+			manifest, err := mcp.ServerManifestFromCatalogEntryManifest(false, allowMissingURL, entry.Spec.Manifest, types.MCPServerManifest{})
 			if err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrBadRequest("catalog entry %s cannot be connected because it could not be converted to an MCP server: %v", id, err)
 			}
@@ -1168,7 +1162,7 @@ func mcpServerOrInstanceFromConnectURL(req api.Context, id, secretBindingAllowed
 			if server.Spec.Manifest.Runtime == types.RuntimeComposite &&
 				server.Spec.Manifest.CompositeConfig != nil &&
 				len(server.Spec.Manifest.CompositeConfig.ComponentServers) > 0 {
-				server, err = waitForCompositeReady(req, server, 30*time.Second)
+				server, err = mcp.WaitForCompositeReady(req.Context(), req.Storage, server, 30*time.Second)
 				if err != nil {
 					return v1.MCPServer{}, v1.MCPServerInstance{}, fmt.Errorf("failed to wait for composite server to be ready: %w", err)
 				}
@@ -1182,7 +1176,7 @@ func mcpServerOrInstanceFromConnectURL(req api.Context, id, secretBindingAllowed
 		})
 
 		server := servers.Items[0]
-		if syncConnectServerRemoteConfigFromCatalogEntry(&server, entry) {
+		if mcp.SyncConnectServerRemoteConfigFromCatalogEntry(&server, entry) {
 			if err := req.Update(&server); err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, fmt.Errorf("failed to update MCP server configuration from catalog entry %s: %w", id, err)
 			}
@@ -1261,77 +1255,11 @@ func entryMissingAdminConfig(ctx context.Context, storage, client kclient.Client
 			return missing, err
 		}
 		for _, binding := range missingBindings {
-			missing.SecretBoundFields = append(missing.SecretBoundFields, secretBoundFieldLabel(ref.prefix, binding.Kind, binding.Header))
+			missing.SecretBoundFields = append(missing.SecretBoundFields, mcp.SecretBoundFieldLabel(ref.prefix, binding.Kind, binding.Header))
 		}
 	}
 
 	return missing, nil
-}
-
-func secretBoundFieldLabel(prefix, kind string, h types.MCPHeader) string {
-	key := h.Key
-	if key == "" {
-		key = h.Name
-	}
-	if key == "" {
-		key = "<unknown>"
-	}
-	if prefix != "" {
-		return fmt.Sprintf("component %s %s %s", prefix, kind, key)
-	}
-	return fmt.Sprintf("%s %s", kind, key)
-}
-
-// catalogEntryRequiresUserURL reports whether a URL must be supplied before a server created
-// from the entry can run. A composite needs none of its own: each component server carries its
-// own hostname constraint and is configured through it.
-func catalogEntryRequiresUserURL(manifest types.MCPServerCatalogEntryManifest) bool {
-	return manifest.Runtime == types.RuntimeRemote &&
-		manifest.RemoteConfig != nil &&
-		(manifest.RemoteConfig.Hostname != "" || manifest.RemoteConfig.URLTemplate != "")
-}
-
-func syncConnectServerRemoteConfigFromCatalogEntry(server *v1.MCPServer, entry v1.MCPServerCatalogEntry) bool {
-	if server.Spec.Manifest.Runtime != types.RuntimeRemote || entry.Spec.Manifest.Runtime != types.RuntimeRemote || entry.Spec.Manifest.RemoteConfig == nil {
-		return false
-	}
-
-	before := utils.Digest(server.Spec)
-	entryRemote := entry.Spec.Manifest.RemoteConfig
-	if server.Spec.Manifest.RemoteConfig == nil {
-		server.Spec.Manifest.RemoteConfig = new(types.RemoteRuntimeConfig)
-	}
-	serverRemote := server.Spec.Manifest.RemoteConfig
-
-	serverRemote.Headers = entryRemote.Headers
-	serverRemote.StaticOAuthRequired = entryRemote.StaticOAuthRequired
-	serverRemote.TunnelName = entryRemote.TunnelName
-	switch {
-	case entryRemote.Hostname != "":
-		serverRemote.Hostname = entryRemote.Hostname
-		serverRemote.IsTemplate = false
-		serverRemote.URLTemplate = ""
-		if serverRemote.URL == "" {
-			server.Spec.NeedsURL = true
-		} else if err := types.ValidateURLHostname(serverRemote.URL, entryRemote.Hostname); err != nil {
-			server.Spec.NeedsURL = true
-			server.Spec.PreviousURL = serverRemote.URL
-			serverRemote.URL = ""
-		} else {
-			server.Spec.NeedsURL = false
-			server.Spec.PreviousURL = ""
-		}
-	case entryRemote.URLTemplate != "":
-		serverRemote.IsTemplate = true
-		serverRemote.URLTemplate = entryRemote.URLTemplate
-		serverRemote.Hostname = ""
-		server.Spec.NeedsURL = serverRemote.URL == ""
-		if !server.Spec.NeedsURL {
-			server.Spec.PreviousURL = ""
-		}
-	}
-
-	return before != utils.Digest(server.Spec)
 }
 
 // validateServerScope checks that the catalog_id or workspace_id in the request URL matches the server.
@@ -1354,131 +1282,6 @@ func serverForActionWithCapabilities(req api.Context, mcpSessionManager *mcp.Ses
 
 	caps, err := mcpSessionManager.ServerCapabilities(req.Context(), serverConfig)
 	return server, serverConfig, caps, err
-}
-
-// serverManifestFromCatalogEntryManifest converts a catalog entry manifest to a server manifest.
-// If the user is an admin, they can override anything from the catalog entry.
-func serverManifestFromCatalogEntryManifest(
-	isAdmin bool,
-	disableHostnameValidation bool,
-	entry types.MCPServerCatalogEntryManifest,
-	input types.MCPServerManifest,
-) (types.MCPServerManifest, error) {
-	var result types.MCPServerManifest
-
-	if entry.Runtime == types.RuntimeComposite {
-		result = types.MCPServerManifest{
-			Name:             entry.Name,
-			Icon:             entry.Icon,
-			ShortDescription: entry.ShortDescription,
-			Description:      entry.Description,
-			Metadata:         entry.Metadata,
-			Runtime:          types.RuntimeComposite,
-			ToolPreview:      entry.ToolPreview,
-			Resources:        entry.Resources,
-			CompositeConfig: &types.CompositeRuntimeConfig{
-				ComponentServers: make([]types.ComponentServer, 0, len(entry.CompositeConfig.ComponentServers)),
-			},
-		}
-
-		// A composite server holds the composition, not its components' configuration: which
-		// components belong to it, and the tool names they are exposed under. The only thing the
-		// caller contributes is whether a component is switched off, which the composite owns
-		// because it is a statement about the composition rather than about the component.
-		var inputConfig types.CompositeRuntimeConfig
-		if input.CompositeConfig != nil {
-			inputConfig = *input.CompositeConfig
-		}
-
-		disabled := make(map[string]bool, len(inputConfig.ComponentServers))
-		for _, componentServer := range inputConfig.ComponentServers {
-			if id := componentServer.ComponentID(); id != "" {
-				disabled[id] = componentServer.Disabled
-			}
-		}
-
-		for _, entryComponent := range entry.CompositeConfig.ComponentServers {
-			result.CompositeConfig.ComponentServers = append(result.CompositeConfig.ComponentServers, types.ComponentServer{
-				MCPServerID:    entryComponent.MCPServerID,
-				CatalogEntryID: entryComponent.CatalogEntryID,
-				ToolOverrides:  entryComponent.ToolOverrides,
-				ToolPrefix:     entryComponent.ToolPrefix,
-				Disabled:       disabled[entryComponent.ComponentID()],
-			})
-		}
-	} else {
-		// Non-composite: use the mapping function from types package to convert catalog entry to server manifest
-		var userURL string
-		if entry.Runtime == types.RuntimeRemote &&
-			entry.RemoteConfig != nil &&
-			entry.RemoteConfig.Hostname != "" &&
-			input.RemoteConfig != nil {
-			userURL = input.RemoteConfig.URL
-		}
-
-		var err error
-		result, err = types.MapCatalogEntryToServer(entry, userURL, disableHostnameValidation)
-		if err != nil {
-			return types.MCPServerManifest{}, err
-		}
-	}
-
-	// If the user is an admin, they can override anything from the catalog entry.
-	if isAdmin {
-		result = mergeMCPServerManifests(result, input)
-	}
-
-	return *result.DeepCopy(), nil
-}
-
-func mergeMCPServerManifests(existing, override types.MCPServerManifest) types.MCPServerManifest {
-	if override.Name != "" {
-		existing.Name = override.Name
-	}
-	if override.ShortDescription != "" {
-		existing.ShortDescription = override.ShortDescription
-	}
-	if override.Description != "" {
-		existing.Description = override.Description
-	}
-	if override.Icon != "" {
-		existing.Icon = override.Icon
-	}
-	if len(override.Env) > 0 {
-		existing.Env = override.Env
-	}
-	if override.Resources != nil {
-		existing.Resources = override.Resources
-	}
-	if override.Runtime != "" {
-		existing.Runtime = override.Runtime
-	}
-
-	// Merge runtime-specific configurations
-	if override.UVXConfig != nil {
-		existing.UVXConfig = override.UVXConfig
-	}
-	if override.NPXConfig != nil {
-		existing.NPXConfig = override.NPXConfig
-	}
-	if override.ContainerizedConfig != nil {
-		existing.ContainerizedConfig = override.ContainerizedConfig
-	}
-	if override.RemoteConfig != nil {
-		if existing.RemoteConfig == nil {
-			existing.RemoteConfig = override.RemoteConfig
-		} else {
-			if override.RemoteConfig.URL != "" {
-				existing.RemoteConfig.URL = override.RemoteConfig.URL
-			}
-
-			if len(override.RemoteConfig.Headers) > 0 {
-				existing.RemoteConfig.Headers = override.RemoteConfig.Headers
-			}
-		}
-	}
-
-	return existing
 }
 
 // applySecretBindingOverlay copies admin-selected secret bindings from the request
@@ -1710,7 +1513,7 @@ func (m *MCPHandler) CreateServer(req api.Context) error {
 		// For multi-user catalog entries, preserve the catalog entry's runtime shape.
 		// Admins may override single-user catalog entry config.
 		isAdminOverride := req.UserIsAdmin() && catalogEntry.Spec.Manifest.ServerUserType.IsSingleUser()
-		manifest, err := serverManifestFromCatalogEntryManifest(isAdminOverride, false, catalogEntry.Spec.Manifest, input.MCPServerManifest)
+		manifest, err := mcp.ServerManifestFromCatalogEntryManifest(isAdminOverride, false, catalogEntry.Spec.Manifest, input.MCPServerManifest)
 		if err != nil {
 			return err
 		}
@@ -1745,7 +1548,7 @@ func (m *MCPHandler) CreateServer(req api.Context) error {
 	if err := mcp.ValidateSecretBindings(server.Spec.Manifest, gitManagedEntry, adminManagedSecretBindings, m.mcpRuntimeBackend); err != nil {
 		return types.NewErrBadRequest("validation failed: %v", err)
 	}
-	addExtractedEnvVars(&server)
+	mcp.AddExtractedEnvVars(&server)
 	if adminManagedSecretBindings && !server.Spec.IsSingleUser() {
 		if err := mcp.ValidateSecretBindingsAvailable(req.Context(), req.LocalK8sClient, req.ObotNamespace, server.Spec.Manifest.Env, server.Spec.Manifest.RemoteConfig, m.secretBindingAllowedLabel); err != nil {
 			return types.NewErrBadRequest("validation failed: %v", err)
@@ -1865,7 +1668,7 @@ func (m *MCPHandler) UpdateServer(req api.Context) error {
 	if adminManagedSecretBindings && !existing.Spec.IsSingleUser() {
 		updatedServer := existing
 		updatedServer.Spec.Manifest = updated
-		addExtractedEnvVars(&updatedServer)
+		mcp.AddExtractedEnvVars(&updatedServer)
 		if err := mcp.ValidateSecretBindingsAvailable(req.Context(), req.LocalK8sClient, req.ObotNamespace, updatedServer.Spec.Manifest.Env, updatedServer.Spec.Manifest.RemoteConfig, m.secretBindingAllowedLabel); err != nil {
 			return types.NewErrBadRequest("validation failed: %v", err)
 		}
@@ -1891,7 +1694,7 @@ func (m *MCPHandler) UpdateServer(req api.Context) error {
 		}
 
 		existing.Spec.Manifest = updated
-		addExtractedEnvVars(&existing)
+		mcp.AddExtractedEnvVars(&existing)
 		return req.Update(&existing)
 	}); err != nil {
 		return err
@@ -1970,7 +1773,7 @@ func (m *MCPHandler) ConfigureServer(req api.Context) error {
 	}
 
 	// Add extracted env vars to the server definition
-	addExtractedEnvVars(&mcpServer)
+	mcp.AddExtractedEnvVars(&mcpServer)
 
 	var envVars map[string]string
 	if err := req.Read(&envVars); err != nil {
@@ -2087,7 +1890,7 @@ func (m *MCPHandler) configureCompositeServer(req api.Context, compositeServer v
 	}
 
 	// Wait for the composite server's child MCP servers and instances to match it's current runtime configuration.
-	compositeServer, err := waitForCompositeReady(req, compositeServer, 5*time.Second)
+	compositeServer, err := mcp.WaitForCompositeReady(req.Context(), req.Storage, compositeServer, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to wait for composite server to be ready for configuration: %w", err)
 	}
@@ -2259,7 +2062,7 @@ func (m *MCPHandler) configureCompositeServer(req api.Context, compositeServer v
 		}
 
 		// Wait for the update to be applied across all component servers
-		compositeServer, err = waitForCompositeReady(req, compositeServer, 30*time.Second)
+		compositeServer, err = mcp.WaitForCompositeReady(req.Context(), req.Storage, compositeServer, 30*time.Second)
 		if err != nil {
 			return fmt.Errorf("failed to wait for composite server to be ready for configuration: %w", err)
 		}
@@ -2385,7 +2188,7 @@ func (m *MCPHandler) DeconfigureServer(req api.Context) error {
 	}
 
 	// Add extracted env vars to the server definition
-	addExtractedEnvVars(&mcpServer)
+	mcp.AddExtractedEnvVars(&mcpServer)
 
 	var credCtx string
 	if catalogID != "" {
@@ -2418,7 +2221,7 @@ func (m *MCPHandler) deconfigureCompositeServer(req api.Context, compositeServer
 	}
 
 	for _, component := range componentServers.Items {
-		addExtractedEnvVars(&component)
+		mcp.AddExtractedEnvVars(&component)
 
 		if err := m.removeMCPServerAndCred(req.Context(), req.GatewayClient, component, []string{fmt.Sprintf("%s-%s", req.User.GetUID(), component.Name)}); err != nil {
 			return err
@@ -2443,7 +2246,7 @@ func (m *MCPHandler) deconfigureCompositeServer(req api.Context, compositeServer
 		}
 	}
 
-	addExtractedEnvVars(&compositeServer)
+	mcp.AddExtractedEnvVars(&compositeServer)
 
 	var (
 		scope   = req.User.GetUID()
@@ -2645,156 +2448,6 @@ func (m *MCPHandler) removeMCPServerAndCred(ctx context.Context, gatewayClient *
 	return nil
 }
 
-func extractEnvVars(text string) []string {
-	if text == "" {
-		return nil
-	}
-
-	matches := envVarRegex.FindAllStringSubmatch(text, -1)
-
-	vars := make([]string, 0, len(matches))
-	for _, match := range matches {
-		if len(match) > 1 {
-			vars = append(vars, match[1])
-		}
-	}
-
-	return vars
-}
-
-// addExtractedEnvVars extracts and adds environment variables to the server definition
-func addExtractedEnvVars(server *v1.MCPServer) {
-	// Keep track of existing env vars in the spec to avoid duplicates
-	existing := make(map[string]struct{})
-	for _, env := range server.Spec.Manifest.Env {
-		existing[env.Key] = struct{}{}
-	}
-
-	// Extract variables based on runtime type
-	var toExtract []string
-	switch server.Spec.Manifest.Runtime {
-	case types.RuntimeUVX:
-		if server.Spec.Manifest.UVXConfig != nil {
-			toExtract = []string{server.Spec.Manifest.UVXConfig.Command}
-			if len(server.Spec.Manifest.UVXConfig.Args) > 0 {
-				toExtract = append(toExtract, server.Spec.Manifest.UVXConfig.Args...)
-			}
-		}
-	case types.RuntimeNPX:
-		if server.Spec.Manifest.NPXConfig != nil && len(server.Spec.Manifest.NPXConfig.Args) > 0 {
-			toExtract = append(toExtract, server.Spec.Manifest.NPXConfig.Args...)
-		}
-	case types.RuntimeContainerized:
-		if server.Spec.Manifest.ContainerizedConfig != nil {
-			toExtract = []string{server.Spec.Manifest.ContainerizedConfig.Command}
-			if len(server.Spec.Manifest.ContainerizedConfig.Args) > 0 {
-				toExtract = append(toExtract, server.Spec.Manifest.ContainerizedConfig.Args...)
-			}
-		}
-	case types.RuntimeRemote:
-		if server.Spec.Manifest.RemoteConfig != nil {
-			toExtract = []string{server.Spec.Manifest.RemoteConfig.URL}
-		}
-	}
-
-	for _, v := range toExtract {
-		for _, env := range extractEnvVars(v) {
-			if _, exists := existing[env]; !exists {
-				server.Spec.Manifest.Env = append(server.Spec.Manifest.Env, types.MCPEnv{
-					MCPHeader: types.MCPHeader{
-						Name:        env,
-						Key:         env,
-						Description: "Automatically detected variable",
-						Sensitive:   true,
-						Required:    true,
-					},
-				})
-			}
-		}
-	}
-}
-
-// addExtractedEnvVarsToCatalogEntry extracts and adds environment variables to the catalog entry manifest
-func addExtractedEnvVarsToCatalogEntry(entry *v1.MCPServerCatalogEntry) {
-	addExtractedEnvVarsToCatalogEntryManifest(&entry.Spec.Manifest)
-}
-
-func addExtractedEnvVarsToCatalogEntryManifest(manifest *types.MCPServerCatalogEntryManifest) {
-	if manifest == nil {
-		return
-	}
-	// A composite declares no runtime configuration of its own to extract variables from; each
-	// component's entry declares its own.
-	if manifest.Runtime == types.RuntimeComposite {
-		return
-	}
-
-	// Keep track of existing env vars in the manifest to avoid duplicates
-	existing := make(map[string]struct{})
-	for _, env := range manifest.Env {
-		existing[env.Key] = struct{}{}
-	}
-
-	// Extract variables based on runtime type
-	var toExtract []string
-
-	switch manifest.Runtime {
-	case types.RuntimeUVX:
-		if manifest.UVXConfig != nil {
-			toExtract = append(toExtract, manifest.UVXConfig.Command)
-			if len(manifest.UVXConfig.Args) > 0 {
-				toExtract = append(toExtract, manifest.UVXConfig.Args...)
-			}
-		}
-	case types.RuntimeNPX:
-		if manifest.NPXConfig != nil && len(manifest.NPXConfig.Args) > 0 {
-			toExtract = append(toExtract, manifest.NPXConfig.Args...)
-		}
-	case types.RuntimeContainerized:
-		if manifest.ContainerizedConfig != nil {
-			toExtract = append(toExtract, manifest.ContainerizedConfig.Command)
-			if len(manifest.ContainerizedConfig.Args) > 0 {
-				toExtract = append(toExtract, manifest.ContainerizedConfig.Args...)
-			}
-		}
-	case types.RuntimeRemote:
-		if manifest.RemoteConfig != nil {
-			// Add the existing headers to the existing map.
-			for _, header := range manifest.RemoteConfig.Headers {
-				existing[header.Key] = struct{}{}
-			}
-
-			toExtract = append(toExtract, manifest.RemoteConfig.URLTemplate)
-		}
-	}
-
-	for _, v := range toExtract {
-		for _, env := range extractEnvVars(v) {
-			if _, exists := existing[env]; !exists {
-				if manifest.Runtime != types.RuntimeRemote {
-					manifest.Env = append(manifest.Env, types.MCPEnv{
-						MCPHeader: types.MCPHeader{
-							Name:        env,
-							Key:         env,
-							Description: "Automatically detected variable",
-							Sensitive:   true,
-							Required:    true,
-						},
-					})
-				} else if manifest.RemoteConfig != nil {
-					manifest.RemoteConfig.Headers = append(manifest.RemoteConfig.Headers, types.MCPHeader{
-						Name:        env,
-						Key:         env,
-						Description: "Automatically detected variable",
-						Sensitive:   false,
-						Required:    true,
-					})
-				}
-			}
-		}
-	}
-}
-
 func ConvertMCPServer(server v1.MCPServer, credEnv map[string]string, serverURL, slug string, components ...types.CompositeComponent) types.MCPServer {
 	var missingEnvVars, missingHeaders []string
 
@@ -2985,7 +2638,7 @@ func credentialEnvForMCPServer(req api.Context, server v1.MCPServer, secretBindi
 		credCtxs = append(credCtxs, fmt.Sprintf("%s-%s", server.Spec.UserID, server.Name))
 	}
 
-	addExtractedEnvVars(&server)
+	mcp.AddExtractedEnvVars(&server)
 
 	cred, err := req.GatewayClient.RevealCredential(req.Context(), credCtxs, server.Name)
 	if err != nil && !errors.As(err, &gateway.CredentialNotFoundError{}) {
@@ -3182,7 +2835,7 @@ func resolveCompositeComponents(req api.Context, composite v1.MCPServer, secretB
 				return nil, fmt.Errorf("failed to reveal credential for component %s: %w", child.Name, err)
 			}
 
-			addExtractedEnvVars(&child)
+			mcp.AddExtractedEnvVars(&child)
 			mergedEnv, err := mcp.MergeBoundCreds(req.Context(), req.LocalK8sClient, req.ObotNamespace, child.Spec.Manifest.Env, child.Spec.Manifest.RemoteConfig, cred.Secrets, secretBindingAllowedLabel)
 			if err != nil {
 				return nil, fmt.Errorf("failed to resolve secret bindings for component %s: %w", child.Name, err)
@@ -3284,7 +2937,7 @@ func (m *MCPHandler) ListServersFromAllSources(req api.Context) error {
 
 	var slug string
 	for _, server := range allowedServers {
-		addExtractedEnvVars(&server)
+		mcp.AddExtractedEnvVars(&server)
 		// Enrich with tool preview data if catalog entry exists
 		if server.Spec.MCPServerCatalogEntryName != "" {
 			entry := catalogEntryMap[server.Spec.MCPServerCatalogEntryName]
@@ -3344,7 +2997,7 @@ func (m *MCPHandler) GetServerFromAllSources(req api.Context) error {
 		return fmt.Errorf("failed to find credential: %w", err)
 	}
 
-	addExtractedEnvVars(&server)
+	mcp.AddExtractedEnvVars(&server)
 
 	// Enrich with tool preview data if catalog entry exists
 	if server.Spec.MCPServerCatalogEntryName != "" {
@@ -4210,7 +3863,7 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, compositeServer v1.
 	oldManifestHash := utils.Digest(compositeServer.Spec.Manifest)
 
 	// Rebuild the composition from the entry, carrying over which components are switched off.
-	updatedManifest, err := serverManifestFromCatalogEntryManifest(
+	updatedManifest, err := mcp.ServerManifestFromCatalogEntryManifest(
 		req.UserIsAdmin(),
 		false,
 		entry.Spec.Manifest,
@@ -4235,7 +3888,7 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, compositeServer v1.
 
 	// Wait for components added or removed by the composition change to materialize, so the
 	// per-component upgrade below sees the full set.
-	if compositeServer, err = waitForCompositeReady(req, compositeServer, 30*time.Second); err != nil {
+	if compositeServer, err = mcp.WaitForCompositeReady(req.Context(), req.Storage, compositeServer, 30*time.Second); err != nil {
 		return fmt.Errorf("failed to wait for component servers to sync: %w", err)
 	}
 
@@ -4307,28 +3960,6 @@ func (*MCPHandler) updateCompositeManifest(req api.Context, name, oldManifestHas
 
 			return true, nil
 		})
-}
-
-// waitForCompositeReady waits until the given timeout for the composite server's current manifest to be applied to its component servers
-func waitForCompositeReady(req api.Context, compositeServer v1.MCPServer, timeout time.Duration) (v1.MCPServer, error) {
-	latest, err := wait.For(
-		req.Context(),
-		req.Storage,
-		&compositeServer,
-		func(cs *v1.MCPServer) (bool, error) {
-			return cs.Spec.Manifest.CompositeConfig != nil &&
-				len(cs.Spec.Manifest.CompositeConfig.ComponentServers) > 0 &&
-				utils.Digest(cs.Spec.Manifest) == cs.Status.ObservedCompositeManifestHash, nil
-		},
-		wait.Option{
-			Timeout: timeout,
-		},
-	)
-	if err != nil {
-		return compositeServer, err
-	}
-
-	return *latest, nil
 }
 
 // ListServerInstances returns all instances for all servers within a specific catalog

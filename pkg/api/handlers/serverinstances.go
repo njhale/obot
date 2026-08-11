@@ -13,6 +13,7 @@ import (
 	"github.com/obot-platform/obot/pkg/api"
 	gateway "github.com/obot-platform/obot/pkg/gateway/client"
 	gatewaytypes "github.com/obot-platform/obot/pkg/gateway/types"
+	"github.com/obot-platform/obot/pkg/mcp"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -305,20 +306,13 @@ func mcpServerInstanceHeaders(instance v1.MCPServerInstance, credEnv map[string]
 		val := credEnv[header.Key]
 		if val != "" {
 			headerNames = append(headerNames, header.Key)
-			headerValues = append(headerValues, applyMCPServerInstanceHeaderPrefix(val, header.Prefix))
+			headerValues = append(headerValues, mcp.ApplyMCPServerInstanceHeaderPrefix(val, header.Prefix))
 		} else if header.Required {
 			missingHeaders = append(missingHeaders, header.Key)
 		}
 	}
 
 	return headerNames, headerValues, missingHeaders
-}
-
-func applyMCPServerInstanceHeaderPrefix(value, prefix string) string {
-	if value == "" || strings.HasPrefix(value, prefix) {
-		return value
-	}
-	return prefix + value
 }
 
 func (h *ServerInstancesHandler) ListServerInstancesForServer(req api.Context) error {

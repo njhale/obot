@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -22,8 +21,6 @@ import (
 	"k8s.io/client-go/util/retry"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
-
-var actionEnvVarRegex = regexp.MustCompile(`\${([^}]+)}`)
 
 const requestTimeUpdateInterval = 15 * time.Minute
 
@@ -141,7 +138,7 @@ func (sm *SessionManager) serverOrInstanceFromConnectURL(ctx context.Context, id
 		if err := sm.storageClient.Get(ctx, kclient.ObjectKey{Namespace: system.DefaultNamespace, Name: id}, &entry); err != nil {
 			return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrNotFound("catalog entry %s not found", id)
 		}
-		addExtractedEnvVarsToCatalogEntry(&entry)
+		AddExtractedEnvVarsToCatalogEntry(&entry)
 
 		var servers v1.MCPServerList
 		if err := sm.storageClient.List(ctx, &servers,
@@ -164,8 +161,8 @@ func (sm *SessionManager) serverOrInstanceFromConnectURL(ctx context.Context, id
 				return v1.MCPServer{}, v1.MCPServerInstance{}, err
 			}
 
-			allowMissingURL := catalogEntryRequiresUserURL(entry.Spec.Manifest)
-			manifest, err := serverManifestFromCatalogEntryManifest(false, allowMissingURL, entry.Spec.Manifest, types.MCPServerManifest{})
+			allowMissingURL := CatalogEntryRequiresUserURL(entry.Spec.Manifest)
+			manifest, err := ServerManifestFromCatalogEntryManifest(false, allowMissingURL, entry.Spec.Manifest, types.MCPServerManifest{})
 			if err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrBadRequest("catalog entry %s cannot be connected because it could not be converted to an MCP server: %v", id, err)
 			}
@@ -201,7 +198,7 @@ func (sm *SessionManager) serverOrInstanceFromConnectURL(ctx context.Context, id
 			if server.Spec.Manifest.Runtime == types.RuntimeComposite &&
 				server.Spec.Manifest.CompositeConfig != nil &&
 				len(server.Spec.Manifest.CompositeConfig.ComponentServers) > 0 {
-				server, err = sm.waitForCompositeReady(ctx, server, 30*time.Second)
+				server, err = WaitForCompositeReady(ctx, sm.storageClient, server, 30*time.Second)
 				if err != nil {
 					return v1.MCPServer{}, v1.MCPServerInstance{}, fmt.Errorf("failed to wait for composite server to be ready: %w", err)
 				}
@@ -215,7 +212,7 @@ func (sm *SessionManager) serverOrInstanceFromConnectURL(ctx context.Context, id
 		})
 
 		server := servers.Items[0]
-		if syncConnectServerRemoteConfigFromCatalogEntry(&server, entry) {
+		if SyncConnectServerRemoteConfigFromCatalogEntry(&server, entry) {
 			if err := sm.storageClient.Update(ctx, &server); err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, fmt.Errorf("failed to update MCP server configuration from catalog entry %s: %w", id, err)
 			}
@@ -238,7 +235,7 @@ func (sm *SessionManager) serverFromMCPServerInstance(ctx context.Context, insta
 		return server, ServerConfig{}, nil, fmt.Errorf("mcp server %s needs to update its URL", server.Name)
 	}
 
-	addExtractedEnvVars(&server)
+	AddExtractedEnvVars(&server)
 
 	var credCtx, scope string
 	if server.Spec.MCPCatalogID != "" {
@@ -332,7 +329,7 @@ func (sm *SessionManager) serverConfigForAction(ctx context.Context, server v1.M
 		scope = server.Spec.UserID
 	}
 
-	addExtractedEnvVars(&server)
+	AddExtractedEnvVars(&server)
 
 	cred, err := sm.gatewayClient.RevealCredential(ctx, credCtxs, server.Name)
 	if err != nil && !errors.As(err, &gateway.CredentialNotFoundError{}) {
@@ -536,7 +533,7 @@ func serverInstanceHeaders(instance v1.MCPServerInstance, credEnv map[string]str
 		val := credEnv[header.Key]
 		if val != "" {
 			headerNames = append(headerNames, header.Key)
-			headerValues = append(headerValues, applyMCPServerInstanceHeaderPrefix(val, header.Prefix))
+			headerValues = append(headerValues, ApplyMCPServerInstanceHeaderPrefix(val, header.Prefix))
 		} else if header.Required {
 			missingHeaders = append(missingHeaders, header.Key)
 		}
@@ -545,7 +542,7 @@ func serverInstanceHeaders(instance v1.MCPServerInstance, credEnv map[string]str
 	return headerNames, headerValues, missingHeaders
 }
 
-func applyMCPServerInstanceHeaderPrefix(value, prefix string) string {
+func ApplyMCPServerInstanceHeaderPrefix(value, prefix string) string {
 	if value == "" || strings.HasPrefix(value, prefix) {
 		return value
 	}
@@ -625,7 +622,7 @@ func (sm *SessionManager) entryMissingAdminConfig(ctx context.Context, entry v1.
 		for _, e := range cm.Env {
 			if e.Required && e.SecretBinding != nil {
 				if _, ok := resolved[e.Key]; !ok {
-					missing.SecretBoundFields = append(missing.SecretBoundFields, secretBoundFieldLabel(ref.prefix, "env", e.MCPHeader))
+					missing.SecretBoundFields = append(missing.SecretBoundFields, SecretBoundFieldLabel(ref.prefix, "env", e.MCPHeader))
 				}
 			}
 		}
@@ -634,7 +631,7 @@ func (sm *SessionManager) entryMissingAdminConfig(ctx context.Context, entry v1.
 			for _, h := range cm.RemoteConfig.Headers {
 				if h.Required && h.SecretBinding != nil {
 					if _, ok := resolved[h.Key]; !ok {
-						missing.SecretBoundFields = append(missing.SecretBoundFields, secretBoundFieldLabel(ref.prefix, "header", h))
+						missing.SecretBoundFields = append(missing.SecretBoundFields, SecretBoundFieldLabel(ref.prefix, "header", h))
 					}
 				}
 			}
@@ -644,7 +641,7 @@ func (sm *SessionManager) entryMissingAdminConfig(ctx context.Context, entry v1.
 	return missing, nil
 }
 
-func secretBoundFieldLabel(prefix, kind string, h types.MCPHeader) string {
+func SecretBoundFieldLabel(prefix, kind string, h types.MCPHeader) string {
 	key := h.Key
 	if key == "" {
 		key = h.Name
@@ -658,16 +655,16 @@ func secretBoundFieldLabel(prefix, kind string, h types.MCPHeader) string {
 	return fmt.Sprintf("%s %s", kind, key)
 }
 
-// catalogEntryRequiresUserURL reports whether a URL must be supplied before a server created
+// CatalogEntryRequiresUserURL reports whether a URL must be supplied before a server created
 // from the entry can run. A composite needs none of its own: each component server carries its
 // own hostname constraint and is configured through it.
-func catalogEntryRequiresUserURL(manifest types.MCPServerCatalogEntryManifest) bool {
+func CatalogEntryRequiresUserURL(manifest types.MCPServerCatalogEntryManifest) bool {
 	return manifest.Runtime == types.RuntimeRemote &&
 		manifest.RemoteConfig != nil &&
 		(manifest.RemoteConfig.Hostname != "" || manifest.RemoteConfig.URLTemplate != "")
 }
 
-func syncConnectServerRemoteConfigFromCatalogEntry(server *v1.MCPServer, entry v1.MCPServerCatalogEntry) bool {
+func SyncConnectServerRemoteConfigFromCatalogEntry(server *v1.MCPServer, entry v1.MCPServerCatalogEntry) bool {
 	if server.Spec.Manifest.Runtime != types.RuntimeRemote || entry.Spec.Manifest.Runtime != types.RuntimeRemote || entry.Spec.Manifest.RemoteConfig == nil {
 		return false
 	}
@@ -710,7 +707,7 @@ func syncConnectServerRemoteConfigFromCatalogEntry(server *v1.MCPServer, entry v
 	return before != utils.Digest(server.Spec)
 }
 
-func serverManifestFromCatalogEntryManifest(isAdmin, disableHostnameValidation bool, entry types.MCPServerCatalogEntryManifest, input types.MCPServerManifest) (types.MCPServerManifest, error) {
+func ServerManifestFromCatalogEntryManifest(isAdmin, disableHostnameValidation bool, entry types.MCPServerCatalogEntryManifest, input types.MCPServerManifest) (types.MCPServerManifest, error) {
 	var result types.MCPServerManifest
 
 	if entry.Runtime == types.RuntimeComposite {
@@ -827,10 +824,12 @@ func mergeMCPServerManifests(existing, override types.MCPServerManifest) types.M
 	return existing
 }
 
-func (sm *SessionManager) waitForCompositeReady(ctx context.Context, compositeServer v1.MCPServer, timeout time.Duration) (v1.MCPServer, error) {
+// WaitForCompositeReady waits for a composite server's component servers and instances to
+// match its current composition, or until the timeout elapses.
+func WaitForCompositeReady(ctx context.Context, c kclient.WithWatch, compositeServer v1.MCPServer, timeout time.Duration) (v1.MCPServer, error) {
 	latest, err := wait.For(
 		ctx,
-		sm.storageClient,
+		c,
 		&compositeServer,
 		func(cs *v1.MCPServer) (bool, error) {
 			return cs.Spec.Manifest.CompositeConfig != nil &&
@@ -848,12 +847,12 @@ func (sm *SessionManager) waitForCompositeReady(ctx context.Context, compositeSe
 	return *latest, nil
 }
 
-func extractEnvVars(text string) []string {
+func ExtractEnvVars(text string) []string {
 	if text == "" {
 		return nil
 	}
 
-	matches := actionEnvVarRegex.FindAllStringSubmatch(text, -1)
+	matches := envVarRegex.FindAllStringSubmatch(text, -1)
 	vars := make([]string, 0, len(matches))
 	for _, match := range matches {
 		if len(match) > 1 {
@@ -864,7 +863,7 @@ func extractEnvVars(text string) []string {
 	return vars
 }
 
-func addExtractedEnvVars(server *v1.MCPServer) {
+func AddExtractedEnvVars(server *v1.MCPServer) {
 	existing := make(map[string]struct{})
 	for _, env := range server.Spec.Manifest.Env {
 		existing[env.Key] = struct{}{}
@@ -897,7 +896,7 @@ func addExtractedEnvVars(server *v1.MCPServer) {
 	}
 
 	for _, v := range toExtract {
-		for _, env := range extractEnvVars(v) {
+		for _, env := range ExtractEnvVars(v) {
 			if _, exists := existing[env]; !exists {
 				server.Spec.Manifest.Env = append(server.Spec.Manifest.Env, types.MCPEnv{
 					MCPHeader: types.MCPHeader{
@@ -913,11 +912,11 @@ func addExtractedEnvVars(server *v1.MCPServer) {
 	}
 }
 
-func addExtractedEnvVarsToCatalogEntry(entry *v1.MCPServerCatalogEntry) {
-	addExtractedEnvVarsToCatalogEntryManifest(&entry.Spec.Manifest)
+func AddExtractedEnvVarsToCatalogEntry(entry *v1.MCPServerCatalogEntry) {
+	AddExtractedEnvVarsToCatalogEntryManifest(&entry.Spec.Manifest)
 }
 
-func addExtractedEnvVarsToCatalogEntryManifest(manifest *types.MCPServerCatalogEntryManifest) {
+func AddExtractedEnvVarsToCatalogEntryManifest(manifest *types.MCPServerCatalogEntryManifest) {
 	if manifest == nil {
 		return
 	}
@@ -962,7 +961,7 @@ func addExtractedEnvVarsToCatalogEntryManifest(manifest *types.MCPServerCatalogE
 	}
 
 	for _, v := range toExtract {
-		for _, env := range extractEnvVars(v) {
+		for _, env := range ExtractEnvVars(v) {
 			if _, exists := existing[env]; !exists {
 				if manifest.Runtime != types.RuntimeRemote {
 					manifest.Env = append(manifest.Env, types.MCPEnv{

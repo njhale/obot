@@ -1032,7 +1032,7 @@ func TestServerFromMultiUserTemplateMarksAdminAddedSecretBinding(t *testing.T) {
 		}}},
 	}
 
-	manifest, err := serverManifestFromCatalogEntryManifest(false, false, entry, input)
+	manifest, err := mcp.ServerManifestFromCatalogEntryManifest(false, false, entry, input)
 	require.NoError(t, err)
 	manifest = applySecretBindingOverlay(manifest, input)
 	markAdminAddedSecretBindings(&manifest, &entry)
@@ -1497,7 +1497,7 @@ func TestServerManifestFromCatalogEntryManifestAllowsMissingRemoteHostname(t *te
 		},
 	}
 
-	manifest, err := serverManifestFromCatalogEntryManifest(false, true, entry, types.MCPServerManifest{})
+	manifest, err := mcp.ServerManifestFromCatalogEntryManifest(false, true, entry, types.MCPServerManifest{})
 	require.NoError(t, err)
 	require.NotNil(t, manifest.RemoteConfig)
 	assert.Equal(t, "api.example.com", manifest.RemoteConfig.Hostname)
@@ -1516,9 +1516,9 @@ func TestServerManifestFromCatalogEntryManifestPreservesRemoteURLTemplateConfig(
 			},
 		},
 	}
-	addExtractedEnvVarsToCatalogEntry(&entry)
+	mcp.AddExtractedEnvVarsToCatalogEntry(&entry)
 
-	manifest, err := serverManifestFromCatalogEntryManifest(false, true, entry.Spec.Manifest, types.MCPServerManifest{})
+	manifest, err := mcp.ServerManifestFromCatalogEntryManifest(false, true, entry.Spec.Manifest, types.MCPServerManifest{})
 	require.NoError(t, err)
 	require.NotNil(t, manifest.RemoteConfig)
 	assert.True(t, manifest.RemoteConfig.IsTemplate)
@@ -1548,7 +1548,7 @@ func TestServerManifestFromCatalogEntryManifestCarriesCompositionOnly(t *testing
 
 	// A composite reaches nothing itself, so it never needs a URL of its own; each component
 	// server is configured through the server it materializes into.
-	require.False(t, catalogEntryRequiresUserURL(entry))
+	require.False(t, mcp.CatalogEntryRequiresUserURL(entry))
 
 	// The caller may switch a component off. Nothing else it sends about a component is kept.
 	input := types.MCPServerManifest{
@@ -1557,7 +1557,7 @@ func TestServerManifestFromCatalogEntryManifestCarriesCompositionOnly(t *testing
 		},
 	}
 
-	manifest, err := serverManifestFromCatalogEntryManifest(false, false, entry, input)
+	manifest, err := mcp.ServerManifestFromCatalogEntryManifest(false, false, entry, input)
 	require.NoError(t, err)
 	require.NotNil(t, manifest.CompositeConfig)
 	assert.Equal(t, []types.ComponentServer{
@@ -1594,7 +1594,7 @@ func TestSyncConnectServerRemoteConfigFromCatalogEntryURLTemplate(t *testing.T) 
 		},
 	}
 
-	changed := syncConnectServerRemoteConfigFromCatalogEntry(&server, entry)
+	changed := mcp.SyncConnectServerRemoteConfigFromCatalogEntry(&server, entry)
 	assert.True(t, changed)
 	require.NotNil(t, server.Spec.Manifest.RemoteConfig)
 	assert.True(t, server.Spec.NeedsURL)
@@ -1626,7 +1626,7 @@ func TestSyncConnectServerRemoteConfigFromCatalogEntryHostname(t *testing.T) {
 		},
 	}
 
-	changed := syncConnectServerRemoteConfigFromCatalogEntry(&server, entry)
+	changed := mcp.SyncConnectServerRemoteConfigFromCatalogEntry(&server, entry)
 	assert.True(t, changed)
 	require.NotNil(t, server.Spec.Manifest.RemoteConfig)
 	assert.True(t, server.Spec.NeedsURL)
