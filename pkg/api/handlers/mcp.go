@@ -86,16 +86,7 @@ func validationOptions(remoteValidationConfig mcp.RemoteMCPURLValidationConfig) 
 
 // ValidationOptionsWithResourceMaximums builds MCP manifest validation options from startup and persisted settings.
 func ValidationOptionsWithResourceMaximums(req api.Context, sessionManager *mcp.SessionManager) (mcp.ValidationOptions, error) {
-	if sessionManager == nil {
-		return mcp.ValidationOptions{}, nil
-	}
-	options := validationOptions(sessionManager.RemoteMCPURLValidationConfig())
-	maximums, err := sessionManager.EffectiveKubernetesResourceMaximums(req.Context(), req.Storage)
-	if err != nil {
-		return mcp.ValidationOptions{}, err
-	}
-	options.ResourceMaximums = maximums
-	return options, nil
+	return sessionManager.ValidationOptions(req.Context(), req.Storage)
 }
 
 func validateServerManifestWithResourceMaximums(req api.Context, manifest types.MCPServerManifest, isMultiUser bool, sessionManager *mcp.SessionManager) error {

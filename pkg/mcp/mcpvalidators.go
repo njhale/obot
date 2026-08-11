@@ -13,6 +13,7 @@ import (
 
 	"github.com/obot-platform/obot/apiclient/types"
 	"k8s.io/apimachinery/pkg/api/resource"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var (
@@ -148,6 +149,24 @@ type ValidationOptions struct {
 	AllowMissingURL              bool
 	RemoteMCPURLValidationConfig RemoteMCPURLValidationConfig
 	ResourceMaximums             ResourceMaximums
+}
+
+// ValidationOptions returns manifest validation options configured from this session manager's
+// startup configuration and the resource maximums currently persisted in settings.
+func (sm *SessionManager) ValidationOptions(ctx context.Context, storageClient kclient.Client) (ValidationOptions, error) {
+	if sm == nil {
+		return ValidationOptions{}, nil
+	}
+
+	maximums, err := sm.EffectiveKubernetesResourceMaximums(ctx, storageClient)
+	if err != nil {
+		return ValidationOptions{}, err
+	}
+
+	return ValidationOptions{
+		RemoteMCPURLValidationConfig: sm.RemoteMCPURLValidationConfig(),
+		ResourceMaximums:             maximums,
+	}, nil
 }
 
 // UVXValidator implements RuntimeValidator for UVX runtime

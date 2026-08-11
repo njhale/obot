@@ -21,6 +21,7 @@ import (
 	"github.com/obot-platform/obot/pkg/mcp"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
+	"github.com/obot-platform/obot/pkg/tunnel"
 	"github.com/obot-platform/obot/pkg/utils"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -106,6 +107,39 @@ func (h *Handler) DetectDrift(req router.Request, _ router.Response) error {
 		return req.Client.Status().Update(req.Ctx, server)
 	}
 	return nil
+}
+
+// validateComponentManifest applies the manifest rules an MCP server created directly from a
+// catalog entry is held to. Secret binding availability is not checked here, since the controller
+// has no local Kubernetes client.
+func (h *Handler) validateComponentManifest(req router.Request, manifest types.MCPServerManifest, entry v1.MCPServerCatalogEntry) error {
+	options, err := h.mcpSessionManager.ValidationOptions(req.Ctx, req.Client)
+	if err != nil {
+		return err
+	}
+	// A component materializes before its user has configured it, so a URL they have yet to
+	// supply is expected. withNeedsURL flags it for configuration instead.
+	options.AllowMissingURL = true
+	// Remote URL egress checks resolve DNS, which does not belong in a reconcile loop. They are
+	// enforced where the URL actually arrives (configuration) and where it is actually used
+	// (deployment), so reconciling a component only validates the shape of its manifest.
+	options.RemoteMCPURLValidationConfig = mcp.RemoteMCPURLValidationConfig{
+		AllowLocalhostMCP: true,
+		AllowPrivateIPMCP: true,
+		AllowLinkLocalMCP: true,
+	}
+
+	if err := mcp.ValidateServerManifest(req.Ctx, manifest, false, options); err != nil {
+		return err
+	}
+	if err := tunnel.ValidateServerTunnelReferences(req.Ctx, req.Client, manifest); err != nil {
+		return err
+	}
+	if err := mcp.ValidateSecretBindings(manifest, entry.IsGitManaged(), false, h.mcpRuntimeBackend); err != nil {
+		return err
+	}
+
+	return mcp.ValidateTemplateReferences(manifest)
 }
 
 // componentNeedsUpdate reports whether any component server of a composite has drifted from its
@@ -1002,6 +1036,14 @@ func (h *Handler) EnsureCompositeComponents(req router.Request, _ router.Respons
 				return fmt.Errorf("failed to derive manifest for component %s: %w", component.CatalogEntryID, err)
 			}
 
+			// A component server is an ordinary MCP server, so it is held to the same rules as one
+			// created directly. A component that fails them does not materialize, leaving the rest
+			// of the composite to reconcile.
+			if err := h.validateComponentManifest(req, componentManifest, componentEntry); err != nil {
+				log.Errorf("Skipping invalid composite component: composite=%s catalogEntry=%s error=%v", compositeServer.Name, component.CatalogEntryID, err)
+				continue
+			}
+
 			newServer := withNeedsURL(v1.MCPServer{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: system.MCPServerPrefix,
@@ -1010,6 +1052,7 @@ func (h *Handler) EnsureCompositeComponents(req router.Request, _ router.Respons
 				},
 				Spec: v1.MCPServerSpec{
 					Manifest:                  componentManifest,
+					UnsupportedTools:          componentEntry.Spec.UnsupportedTools,
 					MCPServerCatalogEntryName: component.CatalogEntryID,
 					UserID:                    compositeServer.Spec.UserID,
 					CompositeName:             compositeServer.Name,

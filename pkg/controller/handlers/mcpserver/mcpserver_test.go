@@ -2169,3 +2169,50 @@ func TestCompositeConfigHasDriftedComparesCompositionOnly(t *testing.T) {
 	assert.True(t, compositeConfigHasDrifted(serverConfig, entryConfig),
 		"a membership change is composition drift")
 }
+
+func TestEnsureCompositeComponentsPropagatesUnsupportedTools(t *testing.T) {
+	entry := newMCPServerCatalogEntry("gmail-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Gmail",
+		Runtime:        types.RuntimeNPX,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "@example/gmail"},
+	})
+	entry.Spec.UnsupportedTools = []string{"broken_tool"}
+	composite := newCompositeServer("composite", types.ComponentServer{CatalogEntryID: entry.Name})
+	c := newFakeClient(t, entry, composite)
+
+	require.NoError(t, ensureCompositeComponents(t, c, composite))
+
+	children := componentServersOf(t, c, composite)
+	require.Len(t, children, 1)
+	assert.Equal(t, []string{"broken_tool"}, children[0].Spec.UnsupportedTools,
+		"a component server must inherit its entry's unsupported tools like any other server")
+}
+
+func TestEnsureCompositeComponentsSkipsComponentFailingValidation(t *testing.T) {
+	// A containerized entry with no image cannot produce a valid server manifest.
+	invalid := newMCPServerCatalogEntry("invalid-entry", types.MCPServerCatalogEntryManifest{
+		Name:                "Invalid",
+		Runtime:             types.RuntimeContainerized,
+		ServerUserType:      types.ServerUserTypeSingleUser,
+		ContainerizedConfig: &types.ContainerizedRuntimeConfig{Port: 8080, Path: "/mcp"},
+	})
+	valid := newMCPServerCatalogEntry("valid-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Valid",
+		Runtime:        types.RuntimeNPX,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "@example/valid"},
+	})
+	composite := newCompositeServer("composite",
+		types.ComponentServer{CatalogEntryID: invalid.Name},
+		types.ComponentServer{CatalogEntryID: valid.Name},
+	)
+	c := newFakeClient(t, invalid, valid, composite)
+
+	require.NoError(t, ensureCompositeComponents(t, c, composite),
+		"an invalid component must not fail the whole composite")
+
+	children := componentServersOf(t, c, composite)
+	require.Len(t, children, 1)
+	assert.Equal(t, valid.Name, children[0].Spec.MCPServerCatalogEntryName)
+}
