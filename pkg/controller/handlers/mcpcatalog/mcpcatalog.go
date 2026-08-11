@@ -402,9 +402,6 @@ func (h *Handler) resolveCompositeSourceRefs(ctx context.Context, c client.Clien
 					errs = append(errs, err)
 					continue
 				}
-
-				component.Manifest = server.Spec.Manifest.ConvertToCatalogEntry()
-				changed = true
 				continue
 			}
 			if component.CatalogEntryID == "" {
@@ -440,9 +437,10 @@ func (h *Handler) resolveCompositeSourceRefs(ctx context.Context, c client.Clien
 				continue
 			}
 
-			component.CatalogEntryID = target.Name
-			component.Manifest = target.Spec.Manifest
-			changed = true
+			if component.CatalogEntryID != target.Name {
+				component.CatalogEntryID = target.Name
+				changed = true
+			}
 		}
 
 		if len(errs) > 0 {

@@ -15,6 +15,7 @@ import (
 	"github.com/obot-platform/obot/pkg/mcp"
 	"github.com/obot-platform/obot/pkg/storage"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
+	storagescheme "github.com/obot-platform/obot/pkg/storage/scheme"
 	"github.com/obot-platform/obot/pkg/system"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1529,64 +1530,44 @@ func TestServerManifestFromCatalogEntryManifestPreservesRemoteURLTemplateConfig(
 	}, manifest.RemoteConfig.Headers)
 }
 
-func TestServerManifestFromCatalogEntryManifestAllowsMissingCompositeRemoteHostname(t *testing.T) {
+func TestServerManifestFromCatalogEntryManifestCarriesCompositionOnly(t *testing.T) {
 	entry := types.MCPServerCatalogEntryManifest{
+		Name:    "Composite",
 		Runtime: types.RuntimeComposite,
 		CompositeConfig: &types.CompositeCatalogConfig{
 			ComponentServers: []types.CatalogComponentServer{
 				{
 					CatalogEntryID: "remote",
-					Manifest: types.MCPServerCatalogEntryManifest{
-						Runtime: types.RuntimeRemote,
-						RemoteConfig: &types.RemoteCatalogConfig{
-							Hostname: "api.example.com",
-						},
-					},
+					ToolPrefix:     "r_",
+					ToolOverrides:  []types.ToolOverride{{Name: "search", Enabled: true}},
 				},
+				{MCPServerID: "shared"},
 			},
 		},
 	}
 
-	require.True(t, catalogEntryRequiresUserURL(entry))
-	manifest, err := serverManifestFromCatalogEntryManifest(false, true, entry, types.MCPServerManifest{})
+	// A composite reaches nothing itself, so it never needs a URL of its own; each component
+	// server is configured through the server it materializes into.
+	require.False(t, catalogEntryRequiresUserURL(entry))
+
+	// The caller may switch a component off. Nothing else it sends about a component is kept.
+	input := types.MCPServerManifest{
+		CompositeConfig: &types.CompositeRuntimeConfig{
+			ComponentServers: []types.ComponentServer{{MCPServerID: "shared", Disabled: true}},
+		},
+	}
+
+	manifest, err := serverManifestFromCatalogEntryManifest(false, false, entry, input)
 	require.NoError(t, err)
 	require.NotNil(t, manifest.CompositeConfig)
-	require.Len(t, manifest.CompositeConfig.ComponentServers, 1)
-	component := manifest.CompositeConfig.ComponentServers[0]
-	require.NotNil(t, component.Manifest.RemoteConfig)
-	assert.Equal(t, "api.example.com", component.Manifest.RemoteConfig.Hostname)
-	assert.Empty(t, component.Manifest.RemoteConfig.URL)
-}
-
-func TestAddExtractedEnvVarsToCatalogEntryRecursesIntoCompositeComponents(t *testing.T) {
-	const template = "https://${WORKSPACE}.example.com/mcp/${SPACE_ID}"
-	entry := v1.MCPServerCatalogEntry{
-		Spec: v1.MCPServerCatalogEntrySpec{
-			Manifest: types.MCPServerCatalogEntryManifest{
-				Runtime: types.RuntimeComposite,
-				CompositeConfig: &types.CompositeCatalogConfig{
-					ComponentServers: []types.CatalogComponentServer{
-						{
-							CatalogEntryID: "remote",
-							Manifest: types.MCPServerCatalogEntryManifest{
-								Runtime: types.RuntimeRemote,
-								RemoteConfig: &types.RemoteCatalogConfig{
-									URLTemplate: template,
-								},
-							},
-						},
-					},
-				},
-			},
+	assert.Equal(t, []types.ComponentServer{
+		{
+			CatalogEntryID: "remote",
+			ToolPrefix:     "r_",
+			ToolOverrides:  []types.ToolOverride{{Name: "search", Enabled: true}},
 		},
-	}
-
-	addExtractedEnvVarsToCatalogEntry(&entry)
-	headers := entry.Spec.Manifest.CompositeConfig.ComponentServers[0].Manifest.RemoteConfig.Headers
-	assert.ElementsMatch(t, []types.MCPHeader{
-		{Name: "WORKSPACE", Key: "WORKSPACE", Description: "Automatically detected variable", Required: true},
-		{Name: "SPACE_ID", Key: "SPACE_ID", Description: "Automatically detected variable", Required: true},
-	}, headers)
+		{MCPServerID: "shared", Disabled: true},
+	}, manifest.CompositeConfig.ComponentServers)
 }
 
 func TestSyncConnectServerRemoteConfigFromCatalogEntryURLTemplate(t *testing.T) {
@@ -1671,6 +1652,7 @@ func TestEntryMissingAdminConfig(t *testing.T) {
 	tests := []struct {
 		name            string
 		manifest        types.MCPServerCatalogEntryManifest
+		components      []*v1.MCPServerCatalogEntry
 		oauthConfigured bool
 		client          kclient.Client
 		wantFields      []string
@@ -1773,22 +1755,28 @@ func TestEntryMissingAdminConfig(t *testing.T) {
 			oauthConfigured: true,
 		},
 		{
-			name: "composite component missing binding",
-			manifest: composite(types.CatalogComponentServer{
-				CatalogEntryID: "c1",
-				Manifest: types.MCPServerCatalogEntryManifest{
-					Runtime: types.RuntimeNPX,
-					Env: []types.MCPEnv{{
-						MCPHeader: types.MCPHeader{
-							Key:           "TOKEN",
-							Required:      true,
-							SecretBinding: &types.MCPSecretBinding{Name: "s", Key: "k"},
-						},
-					}},
-				},
-			}),
+			// A composite binds nothing itself; what it can be missing is read from the entry
+			// each component references.
+			name:     "composite component missing binding",
+			manifest: composite(types.CatalogComponentServer{CatalogEntryID: "c1"}),
+			components: []*v1.MCPServerCatalogEntry{componentCatalogEntry("c1", types.MCPServerCatalogEntryManifest{
+				Runtime: types.RuntimeNPX,
+				Env: []types.MCPEnv{{
+					MCPHeader: types.MCPHeader{
+						Key:           "TOKEN",
+						Required:      true,
+						SecretBinding: &types.MCPSecretBinding{Name: "s", Key: "k"},
+					},
+				}},
+			})},
 			client:     newClient(t),
 			wantFields: []string{"component c1 env TOKEN"},
+		},
+		{
+			name:       "composite component source no longer exists",
+			manifest:   composite(types.CatalogComponentServer{CatalogEntryID: "gone"}),
+			client:     newClient(t),
+			wantFields: nil,
 		},
 	}
 
@@ -1798,7 +1786,13 @@ func TestEntryMissingAdminConfig(t *testing.T) {
 				Spec:   v1.MCPServerCatalogEntrySpec{Manifest: tt.manifest},
 				Status: v1.MCPServerCatalogEntryStatus{OAuthCredentialConfigured: tt.oauthConfigured},
 			}
-			got, err := entryMissingAdminConfig(t.Context(), tt.client, ns, entry, "label")
+
+			storage := fake.NewClientBuilder().WithScheme(storagescheme.Scheme)
+			for _, component := range tt.components {
+				storage = storage.WithObjects(component)
+			}
+
+			got, err := entryMissingAdminConfig(t.Context(), storage.Build(), tt.client, ns, entry, "label")
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantFields, got.SecretBoundFields)
 			assert.Equal(t, tt.wantOAuth, got.StaticOAuth)
@@ -1822,6 +1816,14 @@ func composite(components ...types.CatalogComponentServer) types.MCPServerCatalo
 	return types.MCPServerCatalogEntryManifest{
 		Runtime:         types.RuntimeComposite,
 		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: components},
+	}
+}
+
+// componentCatalogEntry builds the catalog entry a composite component references.
+func componentCatalogEntry(name string, manifest types.MCPServerCatalogEntryManifest) *v1.MCPServerCatalogEntry {
+	return &v1.MCPServerCatalogEntry{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec:       v1.MCPServerCatalogEntrySpec{Manifest: manifest},
 	}
 }
 
@@ -1911,31 +1913,4 @@ func TestUpdateServerFromCatalogEntryPreservesValidHostnameURL(t *testing.T) {
 	assert.Equal(t, "mcptunnel-office", server.Spec.Manifest.RemoteConfig.TunnelName)
 	assert.False(t, server.Spec.NeedsURL)
 	assert.Empty(t, server.Spec.PreviousURL)
-}
-
-func TestServerManifestFromCatalogEntryManifestDefersComponentURLs(t *testing.T) {
-	// A composite is created before its components exist, so a hostname-constrained component
-	// with no URL yet must not fail creation. The component comes up needing configuration.
-	entry := types.MCPServerCatalogEntryManifest{
-		Name:           "Composite",
-		Runtime:        types.RuntimeComposite,
-		ServerUserType: types.ServerUserTypeSingleUser,
-		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{{
-			CatalogEntryID: "remote-entry",
-			Manifest: types.MCPServerCatalogEntryManifest{
-				Name:         "Remote",
-				Runtime:      types.RuntimeRemote,
-				RemoteConfig: &types.RemoteCatalogConfig{Hostname: "*.example.com"},
-			},
-		}}},
-	}
-
-	_, err := serverManifestFromCatalogEntryManifest(false, false, entry, types.MCPServerManifest{})
-	require.Error(t, err, "without deferral a component URL is required up front")
-
-	result, err := serverManifestFromCatalogEntryManifest(true, true, entry, types.MCPServerManifest{})
-	require.NoError(t, err)
-	require.NotNil(t, result.CompositeConfig)
-	require.Len(t, result.CompositeConfig.ComponentServers, 1)
-	assert.Equal(t, "remote-entry", result.CompositeConfig.ComponentServers[0].CatalogEntryID)
 }

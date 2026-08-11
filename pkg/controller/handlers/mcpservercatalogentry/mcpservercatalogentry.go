@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 
 	"github.com/obot-platform/nah/pkg/router"
 	"github.com/obot-platform/obot/apiclient/types"
@@ -196,38 +195,6 @@ func (*Handler) EnsureObservedComponents(req router.Request, _ router.Response) 
 	log.Infof("Updated observed composite components: entry=%s components=%d", entry.Name, len(observed))
 	entry.Status.ObservedComponents = observed
 	return req.Client.Status().Update(req.Ctx, entry)
-}
-
-// CleanupNestedCompositeServers removes component servers with composite runtimes from composite catalog entries.
-// This handler cleans up entries that were created before API validation to prevent nested composite servers.
-func (*Handler) CleanupNestedCompositeEntries(req router.Request, _ router.Response) error {
-	var (
-		entry    = req.Object.(*v1.MCPServerCatalogEntry)
-		manifest = entry.Spec.Manifest
-	)
-
-	if manifest.Runtime != types.RuntimeComposite ||
-		manifest.CompositeConfig == nil {
-		return nil
-	}
-
-	// Remove all composite components from the server's manifest
-	var (
-		components    = manifest.CompositeConfig.ComponentServers
-		numComponents = len(components)
-	)
-	components = slices.DeleteFunc(components, func(component types.CatalogComponentServer) bool {
-		return component.Manifest.Runtime == types.RuntimeComposite
-	})
-
-	if numComponents == len(components) {
-		// No components were removed, so no need to update the manifest.
-		return nil
-	}
-
-	entry.Spec.Manifest.CompositeConfig.ComponentServers = components
-	log.Infof("Pruned nested composite components from MCP catalog entry: entry=%s removedComponents=%d", entry.Name, numComponents-len(components))
-	return kclient.IgnoreNotFound(req.Client.Update(req.Ctx, entry))
 }
 
 // CleanupUnusedOAuthCredentials removes OAuth credentials for remote catalog entries

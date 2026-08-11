@@ -285,23 +285,16 @@ func TestMCPTunnelHandlerUpdatePreservesCatalogEntryTargets(t *testing.T) {
 		},
 		&v1.MCPServerCatalogEntry{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "mcp1a-composite",
+				Name:      "mcp1a-operations",
 				Namespace: system.DefaultNamespace,
 			},
 			Spec: v1.MCPServerCatalogEntrySpec{
 				Manifest: types.MCPServerCatalogEntryManifest{
-					Name:    "Operations Composite",
-					Runtime: types.RuntimeComposite,
-					CompositeConfig: &types.CompositeCatalogConfig{
-						ComponentServers: []types.CatalogComponentServer{{
-							Manifest: types.MCPServerCatalogEntryManifest{
-								Runtime: types.RuntimeRemote,
-								RemoteConfig: &types.RemoteCatalogConfig{
-									FixedURL:   "https://operations.internal/mcp",
-									TunnelName: tunnelName,
-								},
-							},
-						}},
+					Name:    "Operations MCP",
+					Runtime: types.RuntimeRemote,
+					RemoteConfig: &types.RemoteCatalogConfig{
+						FixedURL:   "https://operations.internal/mcp",
+						TunnelName: tunnelName,
 					},
 				},
 			},
@@ -378,23 +371,16 @@ func TestMCPTunnelHandlerDeleteBlockedByCatalogEntries(t *testing.T) {
 		},
 		&v1.MCPServerCatalogEntry{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "mcp1a-composite",
+				Name:      "mcp1a-operations",
 				Namespace: system.DefaultNamespace,
 			},
 			Spec: v1.MCPServerCatalogEntrySpec{
 				Manifest: types.MCPServerCatalogEntryManifest{
-					Name:    "Operations Composite",
-					Runtime: types.RuntimeComposite,
-					CompositeConfig: &types.CompositeCatalogConfig{
-						ComponentServers: []types.CatalogComponentServer{{
-							Manifest: types.MCPServerCatalogEntryManifest{
-								Runtime: types.RuntimeRemote,
-								RemoteConfig: &types.RemoteCatalogConfig{
-									FixedURL:   "https://operations.internal/mcp",
-									TunnelName: tunnelName,
-								},
-							},
-						}},
+					Name:    "Operations MCP",
+					Runtime: types.RuntimeRemote,
+					RemoteConfig: &types.RemoteCatalogConfig{
+						FixedURL:   "https://operations.internal/mcp",
+						TunnelName: tunnelName,
 					},
 				},
 			},

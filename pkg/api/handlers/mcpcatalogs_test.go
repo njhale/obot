@@ -363,78 +363,7 @@ func TestPrepareTempServerConfigDoesNotUseBoundSecretInURL(t *testing.T) {
 	require.Equal(t, "user-value", input[key])
 }
 
-func TestPopulateComponentManifestsHydratesMCPServerID(t *testing.T) {
-	server := &v1.MCPServer{
-		ObjectMeta: metav1.ObjectMeta{Name: "shared-server", Namespace: system.DefaultNamespace},
-		Spec: v1.MCPServerSpec{
-			MCPCatalogID: "default",
-			Manifest: types.MCPServerManifest{
-				Name:            "Shared Server",
-				Runtime:         types.RuntimeContainerized,
-				MultiUserConfig: &types.MultiUserConfig{UserDefinedHeaders: []types.MCPHeader{{Key: "API_KEY", Name: "API Key"}}},
-				ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-					Image: "example/shared:1.0.0",
-					Port:  8080,
-					Path:  "/mcp",
-				},
-			},
-		},
-	}
-	manifest := types.MCPServerCatalogEntryManifest{
-		Runtime: types.RuntimeComposite,
-		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
-			{MCPServerID: "shared-server"},
-		}},
-	}
-
-	err := (&MCPCatalogHandler{}).populateComponentManifests(newPopulateComponentManifestsRequest(server), &manifest, "default", "")
-
-	require.NoError(t, err)
-	require.Len(t, manifest.CompositeConfig.ComponentServers, 1)
-	component := manifest.CompositeConfig.ComponentServers[0]
-	assert.Equal(t, "shared-server", component.MCPServerID)
-	assert.Empty(t, component.CatalogEntryID)
-	assert.Equal(t, "Shared Server", component.Manifest.Name)
-	assert.Equal(t, types.RuntimeContainerized, component.Manifest.Runtime)
-	require.NotNil(t, component.Manifest.ContainerizedConfig)
-	assert.Equal(t, "example/shared:1.0.0", component.Manifest.ContainerizedConfig.Image)
-	require.NotNil(t, component.Manifest.MultiUserConfig)
-}
-
-func TestPopulateComponentManifestsHydratesSameCatalogEntryID(t *testing.T) {
-	entry := &v1.MCPServerCatalogEntry{
-		ObjectMeta: metav1.ObjectMeta{Name: "component-entry", Namespace: system.DefaultNamespace},
-		Spec: v1.MCPServerCatalogEntrySpec{
-			MCPCatalogName: "custom",
-			Manifest: types.MCPServerCatalogEntryManifest{
-				Name:           "Component Server",
-				Runtime:        types.RuntimeNPX,
-				ServerUserType: types.ServerUserTypeSingleUser,
-				NPXConfig:      &types.NPXRuntimeConfig{Package: "@example/component"},
-			},
-		},
-	}
-	manifest := types.MCPServerCatalogEntryManifest{
-		Runtime: types.RuntimeComposite,
-		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
-			{CatalogEntryID: "component-entry"},
-		}},
-	}
-
-	err := (&MCPCatalogHandler{}).populateComponentManifests(newPopulateComponentManifestsRequest(entry), &manifest, "custom", "")
-
-	require.NoError(t, err)
-	require.Len(t, manifest.CompositeConfig.ComponentServers, 1)
-	component := manifest.CompositeConfig.ComponentServers[0]
-	assert.Equal(t, "component-entry", component.CatalogEntryID)
-	assert.Empty(t, component.MCPServerID)
-	assert.Equal(t, "Component Server", component.Manifest.Name)
-	assert.Equal(t, types.RuntimeNPX, component.Manifest.Runtime)
-	require.NotNil(t, component.Manifest.NPXConfig)
-	assert.Equal(t, "@example/component", component.Manifest.NPXConfig.Package)
-}
-
-func newPopulateComponentManifestsRequest(objects ...client.Object) api.Context {
+func newComponentPruneRequest(objects ...client.Object) api.Context {
 	return api.Context{
 		Request:        httptest.NewRequest(http.MethodGet, "/", nil),
 		ResponseWriter: httptest.NewRecorder(),
@@ -445,7 +374,7 @@ func newPopulateComponentManifestsRequest(objects ...client.Object) api.Context 
 	}
 }
 
-func TestPopulateComponentManifestsDropsComponentsWithoutASource(t *testing.T) {
+func TestPruneUnresolvedComponentsDropsComponentsWithoutASource(t *testing.T) {
 	entry := &v1.MCPServerCatalogEntry{
 		ObjectMeta: metav1.ObjectMeta{Name: "component-entry", Namespace: system.DefaultNamespace},
 		Spec: v1.MCPServerCatalogEntrySpec{
@@ -466,14 +395,14 @@ func TestPopulateComponentManifestsDropsComponentsWithoutASource(t *testing.T) {
 		}},
 	}
 
-	err := (&MCPCatalogHandler{}).populateComponentManifests(newPopulateComponentManifestsRequest(entry), &manifest, "default", "")
+	err := pruneUnresolvedComponents(newComponentPruneRequest(entry), &manifest, "default", "")
 
 	require.NoError(t, err)
 	require.Len(t, manifest.CompositeConfig.ComponentServers, 1)
 	assert.Equal(t, "component-entry", manifest.CompositeConfig.ComponentServers[0].CatalogEntryID)
 }
 
-func TestPopulateComponentManifestsRejectsWorkspaceScopedComposites(t *testing.T) {
+func TestPruneUnresolvedComponentsRejectsWorkspaceScopedComposites(t *testing.T) {
 	manifest := types.MCPServerCatalogEntryManifest{
 		Runtime: types.RuntimeComposite,
 		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
@@ -481,7 +410,7 @@ func TestPopulateComponentManifestsRejectsWorkspaceScopedComposites(t *testing.T
 		}},
 	}
 
-	err := (&MCPCatalogHandler{}).populateComponentManifests(newPopulateComponentManifestsRequest(), &manifest, "", "workspace-1")
+	err := pruneUnresolvedComponents(newComponentPruneRequest(), &manifest, "", "workspace-1")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not supported in power user workspaces")

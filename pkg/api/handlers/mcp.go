@@ -1108,7 +1108,7 @@ func mcpServerOrInstanceFromConnectURL(req api.Context, id, secretBindingAllowed
 		}
 		if len(servers.Items) == 0 {
 			// If the user has not configured an MCP server for the catalog entry, create a server for the user.
-			missingAdminConfig, err := entryMissingAdminConfig(req.Context(), req.LocalK8sClient, req.ObotNamespace, entry, secretBindingAllowedLabel)
+			missingAdminConfig, err := entryMissingAdminConfig(req.Context(), req.Storage, req.LocalK8sClient, req.ObotNamespace, entry, secretBindingAllowedLabel)
 			if err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, fmt.Errorf("failed to determine required admin configuration for catalog entry %s: %w", id, err)
 			}
@@ -1197,7 +1197,7 @@ func (m missingCatalogEntryAdminConfig) err(entryID string) error {
 	return types.NewErrBadRequest("catalog entry %s cannot be connected because %s", entryID, strings.Join(parts, "; "))
 }
 
-func entryMissingAdminConfig(ctx context.Context, client kclient.Client, obotNamespace string, entry v1.MCPServerCatalogEntry, secretBindingAllowedLabel string) (missingCatalogEntryAdminConfig, error) {
+func entryMissingAdminConfig(ctx context.Context, storage, client kclient.Client, obotNamespace string, entry v1.MCPServerCatalogEntry, secretBindingAllowedLabel string) (missingCatalogEntryAdminConfig, error) {
 	missing := missingCatalogEntryAdminConfig{
 		StaticOAuth: entryRequiresStaticOAuthCreds(entry),
 	}
@@ -1213,14 +1213,22 @@ func entryMissingAdminConfig(ctx context.Context, client kclient.Client, obotNam
 		if m.CompositeConfig == nil {
 			return missing, nil
 		}
+
+		// A composite binds no secrets itself; what it can be missing is whatever its components
+		// bind, read from the sources they reference.
+		resolved, err := mcp.ResolveComponents(ctx, storage, entry.Namespace, m.CompositeConfig.ComponentServers)
+		if err != nil {
+			return missing, err
+		}
+
 		manifests = nil
-		for _, comp := range m.CompositeConfig.ComponentServers {
-			if comp.MCPServerID != "" {
+		for _, component := range resolved {
+			if component.Ref.MCPServerID != "" || component.Unresolved() {
 				continue
 			}
 			manifests = append(manifests, manifestRef{
-				prefix:   comp.ComponentID(),
-				manifest: comp.Manifest,
+				prefix:   component.Ref.ComponentID(),
+				manifest: component.CatalogEntryManifest(),
 			})
 		}
 	}
@@ -1257,24 +1265,13 @@ func secretBoundFieldLabel(prefix, kind string, h types.MCPHeader) string {
 	return fmt.Sprintf("%s %s", kind, key)
 }
 
+// catalogEntryRequiresUserURL reports whether a URL must be supplied before a server created
+// from the entry can run. A composite needs none of its own: each component server carries its
+// own hostname constraint and is configured through it.
 func catalogEntryRequiresUserURL(manifest types.MCPServerCatalogEntryManifest) bool {
-	if manifest.Runtime == types.RuntimeRemote &&
+	return manifest.Runtime == types.RuntimeRemote &&
 		manifest.RemoteConfig != nil &&
-		(manifest.RemoteConfig.Hostname != "" || manifest.RemoteConfig.URLTemplate != "") {
-		return true
-	}
-	if manifest.Runtime != types.RuntimeComposite || manifest.CompositeConfig == nil {
-		return false
-	}
-	for _, component := range manifest.CompositeConfig.ComponentServers {
-		if component.MCPServerID != "" {
-			continue
-		}
-		if catalogEntryRequiresUserURL(component.Manifest) {
-			return true
-		}
-	}
-	return false
+		(manifest.RemoteConfig.Hostname != "" || manifest.RemoteConfig.URLTemplate != "")
 }
 
 func syncConnectServerRemoteConfigFromCatalogEntry(server *v1.MCPServer, entry v1.MCPServerCatalogEntry) bool {
@@ -1367,50 +1364,29 @@ func serverManifestFromCatalogEntryManifest(
 			},
 		}
 
+		// A composite server holds the composition, not its components' configuration: which
+		// components belong to it, and the tool names they are exposed under. The only thing the
+		// caller contributes is whether a component is switched off, which the composite owns
+		// because it is a statement about the composition rather than about the component.
 		var inputConfig types.CompositeRuntimeConfig
 		if input.CompositeConfig != nil {
 			inputConfig = *input.CompositeConfig
 		}
 
-		inputComponents := make(map[string]types.ComponentServer, len(inputConfig.ComponentServers))
+		disabled := make(map[string]bool, len(inputConfig.ComponentServers))
 		for _, componentServer := range inputConfig.ComponentServers {
 			if id := componentServer.ComponentID(); id != "" {
-				inputComponents[id] = componentServer
+				disabled[id] = componentServer.Disabled
 			}
 		}
 
 		for _, entryComponent := range entry.CompositeConfig.ComponentServers {
-			var (
-				inputComponent = inputComponents[entryComponent.ComponentID()]
-				userURL        string
-			)
-
-			if entryComponent.Manifest.Runtime == types.RuntimeRemote &&
-				entryComponent.Manifest.RemoteConfig != nil &&
-				entryComponent.Manifest.RemoteConfig.Hostname != "" &&
-				inputComponent.Manifest.RemoteConfig != nil {
-				// Add protocol prefix to the URL if it's missing
-				if url := inputComponent.Manifest.RemoteConfig.URL; url != "" && !strings.HasPrefix(url, "http") {
-					inputComponent.Manifest.RemoteConfig.URL = "https://" + url
-				}
-				userURL = inputComponent.Manifest.RemoteConfig.URL
-			}
-
-			// Map the catalog entry to a server manifest.
-			// Pass the disabled field to bypass hostname validation for disabled remote components.
-			// This is necessary because users don't need to provide required configuration for disabled components.
-			resultComponentManifest, err := types.MapCatalogEntryToServer(entryComponent.Manifest, userURL, inputComponent.Disabled || disableHostnameValidation)
-			if err != nil {
-				return types.MCPServerManifest{}, fmt.Errorf("failed to convert component manifest: %w", err)
-			}
-
 			result.CompositeConfig.ComponentServers = append(result.CompositeConfig.ComponentServers, types.ComponentServer{
 				MCPServerID:    entryComponent.MCPServerID,
 				CatalogEntryID: entryComponent.CatalogEntryID,
 				ToolOverrides:  entryComponent.ToolOverrides,
 				ToolPrefix:     entryComponent.ToolPrefix,
-				Disabled:       inputComponent.Disabled,
-				Manifest:       resultComponentManifest,
+				Disabled:       disabled[entryComponent.ComponentID()],
 			})
 		}
 	} else {
@@ -1713,11 +1689,7 @@ func (m *MCPHandler) CreateServer(req api.Context) error {
 		// For multi-user catalog entries, preserve the catalog entry's runtime shape.
 		// Admins may override single-user catalog entry config.
 		isAdminOverride := req.UserIsAdmin() && catalogEntry.Spec.Manifest.ServerUserType.IsSingleUser()
-		// A composite's components are configured once they materialize as their own servers, so a
-		// component URL the user has not supplied yet is expected. Each component comes up flagged
-		// as needing one instead.
-		deferComponentURLs := catalogEntry.Spec.Manifest.Runtime == types.RuntimeComposite
-		manifest, err := serverManifestFromCatalogEntryManifest(isAdminOverride, deferComponentURLs, catalogEntry.Spec.Manifest, input.MCPServerManifest)
+		manifest, err := serverManifestFromCatalogEntryManifest(isAdminOverride, false, catalogEntry.Spec.Manifest, input.MCPServerManifest)
 		if err != nil {
 			return err
 		}
@@ -2150,14 +2122,18 @@ func (m *MCPHandler) configureCompositeServer(req api.Context, compositeServer v
 			continue
 		}
 
-		sanitizeConfig(config.Config, component.Manifest)
-
 		if component.Disabled != config.Disabled {
 			component.Disabled = config.Disabled
 			manifestChanged = true
 		}
 
 		if instance, instanceExists := existingInstances[componentID]; instanceExists && !component.Disabled {
+			var multiUserServer v1.MCPServer
+			if err := req.Get(&multiUserServer, instance.Spec.MCPServerName); err != nil {
+				return fmt.Errorf("failed to get multi-user server for component %s: %w", componentID, err)
+			}
+			sanitizeConfig(config.Config, multiUserServer.Spec.Manifest)
+
 			componentCreds[componentID] = gatewaytypes.Credential{
 				Context: MCPServerInstanceCredentialContext(instance),
 				Name:    instance.Name,
@@ -2167,7 +2143,11 @@ func (m *MCPHandler) configureCompositeServer(req api.Context, compositeServer v
 		}
 
 		if server, serverExists := existingServers[componentID]; serverExists && !component.Disabled {
-			if runtime, remoteConfig := component.Manifest.Runtime, component.Manifest.RemoteConfig; runtime == types.RuntimeRemote && remoteConfig != nil {
+			// The component server owns its configuration, so its own manifest is what decides
+			// which fields the user may set and what a supplied URL has to satisfy.
+			sanitizeConfig(config.Config, server.Spec.Manifest)
+
+			if runtime, remoteConfig := server.Spec.Manifest.Runtime, server.Spec.Manifest.RemoteConfig; runtime == types.RuntimeRemote && remoteConfig != nil {
 				// Handle URL changes for templates and hostname constraints
 				originalURL := remoteConfig.URL
 				if remoteConfig.URLTemplate != "" {
@@ -2185,23 +2165,18 @@ func (m *MCPHandler) configureCompositeServer(req api.Context, compositeServer v
 
 				if remoteConfig.URL != originalURL {
 					// Capture and validate the changes
-					component.Manifest.RemoteConfig = remoteConfig
-					if err := validateServerManifestWithResourceMaximums(req, component.Manifest, false, m.mcpSessionManager); err != nil {
+					if err := validateServerManifestWithResourceMaximums(req, server.Spec.Manifest, false, m.mcpSessionManager); err != nil {
 						return fmt.Errorf("failed to validate server manifest %w", err)
 					}
-					if err := obottunnel.ValidateServerTunnelReferences(req.Context(), req.Storage, component.Manifest); err != nil {
+					if err := obottunnel.ValidateServerTunnelReferences(req.Context(), req.Storage, server.Spec.Manifest); err != nil {
 						return fmt.Errorf("failed to validate server tunnel configuration: %w", err)
 					}
-					server.Spec.Manifest = component.Manifest
 					server.Spec.NeedsURL = false
 					server.Spec.PreviousURL = ""
 					if err := req.Update(&server); err != nil {
 						return fmt.Errorf("failed to update component server URL configuration: %w", err)
 					}
 					existingServers[componentID] = server
-
-					// Mark the composite manifest as changed
-					manifestChanged = true
 				}
 			}
 
@@ -2727,10 +2702,9 @@ func addExtractedEnvVarsToCatalogEntryManifest(manifest *types.MCPServerCatalogE
 	if manifest == nil {
 		return
 	}
-	if manifest.Runtime == types.RuntimeComposite && manifest.CompositeConfig != nil {
-		for i := range manifest.CompositeConfig.ComponentServers {
-			addExtractedEnvVarsToCatalogEntryManifest(&manifest.CompositeConfig.ComponentServers[i].Manifest)
-		}
+	// A composite declares no runtime configuration of its own to extract variables from; each
+	// component's entry declares its own.
+	if manifest.Runtime == types.RuntimeComposite {
 		return
 	}
 

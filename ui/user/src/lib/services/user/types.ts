@@ -626,10 +626,14 @@ export interface MultiUserConfig {
 export interface CompositeRuntimeConfig {
 	componentServers: ComponentServer[];
 }
+/**
+ * Reference to one component of a composite server, plus how its tools are exposed. The
+ * component's own configuration belongs to the MCP server it materializes into; read it from
+ * the parent's resolved `components` instead.
+ */
 export interface ComponentServer {
 	catalogEntryID?: string;
 	mcpServerID?: string;
-	manifest?: MCPServer;
 	toolOverrides?: ToolOverride[];
 	toolPrefix?: string;
 	disabled?: boolean;

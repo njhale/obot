@@ -587,14 +587,22 @@ func (sm *SessionManager) entryMissingAdminConfig(ctx context.Context, entry v1.
 		if m.CompositeConfig == nil {
 			return missing, nil
 		}
+
+		// A composite binds no secrets itself; what it can be missing is whatever its components
+		// bind, read from the sources they reference.
+		resolved, err := ResolveComponents(ctx, sm.storageClient, entry.Namespace, m.CompositeConfig.ComponentServers)
+		if err != nil {
+			return missing, err
+		}
+
 		manifests = nil
-		for _, comp := range m.CompositeConfig.ComponentServers {
-			if comp.MCPServerID != "" {
+		for _, component := range resolved {
+			if component.Ref.MCPServerID != "" || component.Unresolved() {
 				continue
 			}
 			manifests = append(manifests, manifestRef{
-				prefix:   comp.ComponentID(),
-				manifest: comp.Manifest,
+				prefix:   component.Ref.ComponentID(),
+				manifest: component.CatalogEntryManifest(),
 			})
 		}
 	}
@@ -654,24 +662,13 @@ func secretBoundFieldLabel(prefix, kind string, h types.MCPHeader) string {
 	return fmt.Sprintf("%s %s", kind, key)
 }
 
+// catalogEntryRequiresUserURL reports whether a URL must be supplied before a server created
+// from the entry can run. A composite needs none of its own: each component server carries its
+// own hostname constraint and is configured through it.
 func catalogEntryRequiresUserURL(manifest types.MCPServerCatalogEntryManifest) bool {
-	if manifest.Runtime == types.RuntimeRemote &&
+	return manifest.Runtime == types.RuntimeRemote &&
 		manifest.RemoteConfig != nil &&
-		(manifest.RemoteConfig.Hostname != "" || manifest.RemoteConfig.URLTemplate != "") {
-		return true
-	}
-	if manifest.Runtime != types.RuntimeComposite || manifest.CompositeConfig == nil {
-		return false
-	}
-	for _, component := range manifest.CompositeConfig.ComponentServers {
-		if component.MCPServerID != "" {
-			continue
-		}
-		if catalogEntryRequiresUserURL(component.Manifest) {
-			return true
-		}
-	}
-	return false
+		(manifest.RemoteConfig.Hostname != "" || manifest.RemoteConfig.URLTemplate != "")
 }
 
 func syncConnectServerRemoteConfigFromCatalogEntry(server *v1.MCPServer, entry v1.MCPServerCatalogEntry) bool {
@@ -739,46 +736,29 @@ func serverManifestFromCatalogEntryManifest(isAdmin, disableHostnameValidation b
 			},
 		}
 
+		// A composite server holds the composition, not its components' configuration: which
+		// components belong to it, and the tool names they are exposed under. The only thing the
+		// caller contributes is whether a component is switched off, which the composite owns
+		// because it is a statement about the composition rather than about the component.
 		var inputConfig types.CompositeRuntimeConfig
 		if input.CompositeConfig != nil {
 			inputConfig = *input.CompositeConfig
 		}
 
-		inputComponents := make(map[string]types.ComponentServer, len(inputConfig.ComponentServers))
+		disabled := make(map[string]bool, len(inputConfig.ComponentServers))
 		for _, componentServer := range inputConfig.ComponentServers {
 			if id := componentServer.ComponentID(); id != "" {
-				inputComponents[id] = componentServer
+				disabled[id] = componentServer.Disabled
 			}
 		}
 
 		for _, entryComponent := range entry.CompositeConfig.ComponentServers {
-			var (
-				inputComponent = inputComponents[entryComponent.ComponentID()]
-				userURL        string
-			)
-
-			if entryComponent.Manifest.Runtime == types.RuntimeRemote &&
-				entryComponent.Manifest.RemoteConfig != nil &&
-				entryComponent.Manifest.RemoteConfig.Hostname != "" &&
-				inputComponent.Manifest.RemoteConfig != nil {
-				if url := inputComponent.Manifest.RemoteConfig.URL; url != "" && !strings.HasPrefix(url, "http") {
-					inputComponent.Manifest.RemoteConfig.URL = "https://" + url
-				}
-				userURL = inputComponent.Manifest.RemoteConfig.URL
-			}
-
-			resultComponentManifest, err := types.MapCatalogEntryToServer(entryComponent.Manifest, userURL, inputComponent.Disabled || disableHostnameValidation)
-			if err != nil {
-				return types.MCPServerManifest{}, fmt.Errorf("failed to convert component manifest: %w", err)
-			}
-
 			result.CompositeConfig.ComponentServers = append(result.CompositeConfig.ComponentServers, types.ComponentServer{
 				MCPServerID:    entryComponent.MCPServerID,
 				CatalogEntryID: entryComponent.CatalogEntryID,
 				ToolOverrides:  entryComponent.ToolOverrides,
 				ToolPrefix:     entryComponent.ToolPrefix,
-				Disabled:       inputComponent.Disabled,
-				Manifest:       resultComponentManifest,
+				Disabled:       disabled[entryComponent.ComponentID()],
 			})
 		}
 	} else {
@@ -945,10 +925,9 @@ func addExtractedEnvVarsToCatalogEntryManifest(manifest *types.MCPServerCatalogE
 	if manifest == nil {
 		return
 	}
-	if manifest.Runtime == types.RuntimeComposite && manifest.CompositeConfig != nil {
-		for i := range manifest.CompositeConfig.ComponentServers {
-			addExtractedEnvVarsToCatalogEntryManifest(&manifest.CompositeConfig.ComponentServers[i].Manifest)
-		}
+	// A composite declares no runtime configuration of its own to extract variables from; each
+	// component's entry declares its own.
+	if manifest.Runtime == types.RuntimeComposite {
 		return
 	}
 

@@ -10,7 +10,6 @@ import (
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	storagescheme "github.com/obot-platform/obot/pkg/storage/scheme"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -44,7 +43,6 @@ func TestResolveCompositeSourceRefs(t *testing.T) {
 	assert.Len(t, result, 2)
 	component := composite.Spec.Manifest.CompositeConfig.ComponentServers[0]
 	assert.Equal(t, "target", component.CatalogEntryID)
-	assert.Equal(t, target.Spec.Manifest.Name, component.Manifest.Name)
 }
 
 func TestReadMCPCatalogResolvesCompositeSourceRefs(t *testing.T) {
@@ -89,7 +87,6 @@ compositeConfig:
 	if assert.NotNil(t, composite) && assert.NotNil(t, target) {
 		component := composite.Spec.Manifest.CompositeConfig.ComponentServers[0]
 		assert.Equal(t, target.Name, component.CatalogEntryID)
-		assert.Equal(t, "Tool", component.Manifest.Name)
 	}
 }
 
@@ -135,7 +132,6 @@ compositeConfig:
 	if assert.NotNil(t, composite) && assert.NotNil(t, target) {
 		component := composite.Spec.Manifest.CompositeConfig.ComponentServers[0]
 		assert.Equal(t, target.Name, component.CatalogEntryID)
-		assert.Equal(t, "Tool", component.Manifest.Name)
 	}
 }
 
@@ -160,7 +156,7 @@ func TestResolveCompositeSourceRefsSkipsCompositeWithUnresolvableShorthand(t *te
 	assert.Contains(t, errsBySourceURL["source"], `unresolved catalogEntryID "internal-id"`)
 }
 
-func TestResolveCompositeSourceRefsHydratesInternalIDComponents(t *testing.T) {
+func TestResolveCompositeSourceRefsResolvesInternalIDComponents(t *testing.T) {
 	target := testCatalogEntry("default-gmail-8a99d8be", "source", "gmail.yaml", types.MCPServerCatalogEntryManifest{
 		Name:             "Gmail",
 		ShortDescription: "Gmail",
@@ -188,10 +184,9 @@ func TestResolveCompositeSourceRefsHydratesInternalIDComponents(t *testing.T) {
 	assert.Len(t, result, 2)
 	component := composite.Spec.Manifest.CompositeConfig.ComponentServers[0]
 	assert.Equal(t, "default-gmail-8a99d8be", component.CatalogEntryID)
-	assert.Equal(t, "Gmail", component.Manifest.Name)
 }
 
-func TestResolveCompositeSourceRefsHydratesUICreatedSameCatalogEntry(t *testing.T) {
+func TestResolveCompositeSourceRefsResolvesUICreatedSameCatalogEntry(t *testing.T) {
 	target := testCatalogEntry("ui-created-component", "", "", types.MCPServerCatalogEntryManifest{
 		Name:             "UI Created Component",
 		ShortDescription: "UI Created Component",
@@ -220,12 +215,9 @@ func TestResolveCompositeSourceRefsHydratesUICreatedSameCatalogEntry(t *testing.
 	assert.Len(t, result, 1)
 	component := composite.Spec.Manifest.CompositeConfig.ComponentServers[0]
 	assert.Equal(t, "ui-created-component", component.CatalogEntryID)
-	assert.Equal(t, "UI Created Component", component.Manifest.Name)
-	require.NotNil(t, component.Manifest.NPXConfig)
-	assert.Equal(t, "ui-created-component", component.Manifest.NPXConfig.Package)
 }
 
-func TestResolveCompositeSourceRefsHydratesMultiUserServerIDComponents(t *testing.T) {
+func TestResolveCompositeSourceRefsResolvesMultiUserServerIDComponents(t *testing.T) {
 	server := testMCPServer("shared-server", "default", types.MCPServerManifest{
 		Name:            "Shared Server",
 		Runtime:         types.RuntimeContainerized,
@@ -254,11 +246,6 @@ func TestResolveCompositeSourceRefsHydratesMultiUserServerIDComponents(t *testin
 	component := composite.Spec.Manifest.CompositeConfig.ComponentServers[0]
 	assert.Equal(t, "shared-server", component.MCPServerID)
 	assert.Empty(t, component.CatalogEntryID)
-	require.NotNil(t, component.Manifest.ContainerizedConfig)
-	assert.Equal(t, "Shared Server", component.Manifest.Name)
-	assert.Equal(t, types.RuntimeContainerized, component.Manifest.Runtime)
-	assert.Equal(t, "example/shared:1.0.0", component.Manifest.ContainerizedConfig.Image)
-	assert.NotNil(t, component.Manifest.MultiUserConfig)
 }
 
 func TestResolveCompositeSourceRefsRejectsMultiUserServerOutsideCatalog(t *testing.T) {
@@ -335,7 +322,6 @@ compositeConfig:
 	if assert.NotNil(t, composite) && assert.NotNil(t, target) {
 		component := composite.Spec.Manifest.CompositeConfig.ComponentServers[0]
 		assert.Equal(t, target.Name, component.CatalogEntryID)
-		assert.Equal(t, "Tool", component.Manifest.Name)
 	}
 }
 
@@ -367,7 +353,6 @@ func TestResolveCompositeSourceRefsResolvesExplicitSourceRefWithoutCurrentSource
 	assert.Len(t, result, 2)
 	component := composite.Spec.Manifest.CompositeConfig.ComponentServers[0]
 	assert.Equal(t, "target", component.CatalogEntryID)
-	assert.Equal(t, "Tool", component.Manifest.Name)
 }
 
 func TestResolveCompositeSourceRefsSkipsUnresolvedComposite(t *testing.T) {

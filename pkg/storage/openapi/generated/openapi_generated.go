@@ -2867,7 +2867,8 @@ func schema_obot_platform_obot_apiclient_types_CatalogComponentServer(ref common
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Type: []string{"object"},
+				Description: "CatalogComponentServer references one component of a composite catalog entry and says how its tools are exposed. The component's own configuration is not held here: it belongs to the catalog entry or multi-user server referenced, and is read from there.",
+				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"catalogEntryID": {
 						SchemaProps: spec.SchemaProps{
@@ -2881,13 +2882,6 @@ func schema_obot_platform_obot_apiclient_types_CatalogComponentServer(ref common
 							Description: "MCPServerID if set, reference the multi-user MCP server the component server proxies to",
 							Type:        []string{"string"},
 							Format:      "",
-						},
-					},
-					"manifest": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Manifest is the catalog entry manifest of the component server",
-							Default:     map[string]interface{}{},
-							Ref:         ref("github.com/obot-platform/obot/apiclient/types.MCPServerCatalogEntryManifest"),
 						},
 					},
 					"toolOverrides": {
@@ -2911,11 +2905,10 @@ func schema_obot_platform_obot_apiclient_types_CatalogComponentServer(ref common
 						},
 					},
 				},
-				Required: []string{"manifest"},
 			},
 		},
 		Dependencies: []string{
-			"github.com/obot-platform/obot/apiclient/types.MCPServerCatalogEntryManifest", "github.com/obot-platform/obot/apiclient/types.ToolOverride"},
+			"github.com/obot-platform/obot/apiclient/types.ToolOverride"},
 	}
 }
 
@@ -3071,7 +3064,8 @@ func schema_obot_platform_obot_apiclient_types_ComponentServer(ref common.Refere
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Type: []string{"object"},
+				Description: "ComponentServer references one component of a composite MCP server and says how its tools are exposed. The component's own configuration is not held here: it belongs to the MCP server the component materializes into, and is read from there.",
+				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"catalogEntryID": {
 						SchemaProps: spec.SchemaProps{
@@ -3085,13 +3079,6 @@ func schema_obot_platform_obot_apiclient_types_ComponentServer(ref common.Refere
 							Description: "MCPServerID if set, reference the multi-user MCP server the component server proxies to",
 							Type:        []string{"string"},
 							Format:      "",
-						},
-					},
-					"manifest": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Manifest is the runtime manifest of the component server",
-							Default:     map[string]interface{}{},
-							Ref:         ref("github.com/obot-platform/obot/apiclient/types.MCPServerManifest"),
 						},
 					},
 					"toolOverrides": {
@@ -3122,11 +3109,10 @@ func schema_obot_platform_obot_apiclient_types_ComponentServer(ref common.Refere
 						},
 					},
 				},
-				Required: []string{"manifest"},
 			},
 		},
 		Dependencies: []string{
-			"github.com/obot-platform/obot/apiclient/types.MCPServerManifest", "github.com/obot-platform/obot/apiclient/types.ToolOverride"},
+			"github.com/obot-platform/obot/apiclient/types.ToolOverride"},
 	}
 }
 

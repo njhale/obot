@@ -1358,11 +1358,6 @@ func TestEnsureCompositeComponentsDerivesNewComponentFromItsCatalogEntry(t *test
 	// The composite still carries an older snapshot of the component.
 	composite := newCompositeServer("composite", types.ComponentServer{
 		CatalogEntryID: entry.Name,
-		Manifest: types.MCPServerManifest{
-			Name:      "Gmail",
-			Runtime:   types.RuntimeNPX,
-			NPXConfig: &types.NPXRuntimeConfig{Package: "@example/gmail@1.0.0"},
-		},
 	})
 	c := newFakeClient(t, entry, composite)
 
@@ -1378,29 +1373,35 @@ func TestEnsureCompositeComponentsDerivesNewComponentFromItsCatalogEntry(t *test
 	assert.Equal(t, "user-1", children[0].Spec.UserID)
 }
 
-func TestEnsureCompositeComponentsPreservesUserSuppliedComponentURL(t *testing.T) {
+func TestEnsureCompositeComponentsLeavesAConfiguredComponentURLAlone(t *testing.T) {
 	entry := newMCPServerCatalogEntry("remote-entry", types.MCPServerCatalogEntryManifest{
 		Name:           "Remote",
 		Runtime:        types.RuntimeRemote,
 		ServerUserType: types.ServerUserTypeSingleUser,
 		RemoteConfig:   &types.RemoteCatalogConfig{Hostname: "*.example.com"},
 	})
-	composite := newCompositeServer("composite", types.ComponentServer{
-		CatalogEntryID: entry.Name,
-		Manifest: types.MCPServerManifest{
-			Name:         "Remote",
-			Runtime:      types.RuntimeRemote,
-			RemoteConfig: &types.RemoteRuntimeConfig{URL: "https://tenant.example.com/mcp", Hostname: "*.example.com"},
-		},
-	})
-	c := newFakeClient(t, entry, composite)
+	composite := newCompositeServer("composite", types.ComponentServer{CatalogEntryID: entry.Name})
+
+	// The URL lives on the component server, supplied when the user configured it.
+	child := newMCPServer("component-server")
+	child.Spec.CompositeName = composite.Name
+	child.Spec.MCPServerCatalogEntryName = entry.Name
+	child.Spec.UserID = composite.Spec.UserID
+	child.Spec.Manifest = types.MCPServerManifest{
+		Name:         "Remote",
+		Runtime:      types.RuntimeRemote,
+		RemoteConfig: &types.RemoteRuntimeConfig{URL: "https://tenant.example.com/mcp", Hostname: "*.example.com"},
+	}
+
+	c := newFakeClient(t, entry, composite, child)
 
 	require.NoError(t, ensureCompositeComponents(t, c, composite))
 
 	children := componentServersOf(t, c, composite)
 	require.Len(t, children, 1)
 	require.NotNil(t, children[0].Spec.Manifest.RemoteConfig)
-	assert.Equal(t, "https://tenant.example.com/mcp", children[0].Spec.Manifest.RemoteConfig.URL)
+	assert.Equal(t, "https://tenant.example.com/mcp", children[0].Spec.Manifest.RemoteConfig.URL,
+		"reconciling the composite must not reach into a component's own configuration")
 	assert.False(t, children[0].Spec.NeedsURL)
 }
 
@@ -1440,7 +1441,6 @@ func TestEnsureCompositeComponentsLeavesExistingComponentAloneWhenOnlyItsEntryCh
 	}
 	composite := newCompositeServer("composite", types.ComponentServer{
 		CatalogEntryID: entry.Name,
-		Manifest:       componentManifest,
 	})
 
 	child := newMCPServer("component-server")
@@ -2198,18 +2198,10 @@ func TestCompositeConfigHasDriftedComparesCompositionOnly(t *testing.T) {
 	serverConfig := &types.CompositeRuntimeConfig{ComponentServers: []types.ComponentServer{{
 		CatalogEntryID: "gmail-entry",
 		ToolPrefix:     "gmail",
-		Manifest: types.MCPServerManifest{
-			Runtime:   types.RuntimeNPX,
-			NPXConfig: &types.NPXRuntimeConfig{Package: "@example/gmail@1.0.0"},
-		},
 	}}}
 	entryConfig := &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{{
 		CatalogEntryID: "gmail-entry",
 		ToolPrefix:     "gmail",
-		Manifest: types.MCPServerCatalogEntryManifest{
-			Runtime:   types.RuntimeNPX,
-			NPXConfig: &types.NPXRuntimeConfig{Package: "@example/gmail@2.0.0"},
-		},
 	}}}
 
 	assert.False(t, compositeConfigHasDrifted(serverConfig, entryConfig))

@@ -707,10 +707,14 @@ export interface RemoteCatalogConfigAdmin {
 export interface CompositeCatalogConfig {
 	componentServers: CatalogComponentServer[];
 }
+/**
+ * Reference to one component of a composite catalog entry, plus how its tools are exposed. The
+ * component's own configuration belongs to the entry or multi-user server referenced; read it
+ * from the parent's resolved `components` instead.
+ */
 export interface CatalogComponentServer {
 	catalogEntryID?: string;
 	mcpServerID?: string;
-	manifest?: MCPCatalogEntryServerManifest;
 	toolOverrides?: ToolOverride[];
 	toolPrefix?: string;
 }

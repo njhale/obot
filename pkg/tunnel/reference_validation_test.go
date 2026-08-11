@@ -107,20 +107,15 @@ func TestValidateCatalogEntryTunnelReferences(t *testing.T) {
 			wantErr: "leading or trailing whitespace",
 		},
 		{
-			name: "validates composite component recursively",
+			// A composite references its components; it does not reach anything itself. Each
+			// component is a catalog entry in its own right and is validated as one.
+			name: "composite has no tunnel reference of its own",
 			manifest: types.MCPServerCatalogEntryManifest{
 				Runtime: types.RuntimeComposite,
 				CompositeConfig: &types.CompositeCatalogConfig{
-					ComponentServers: []types.CatalogComponentServer{{
-						CatalogEntryID: "remote",
-						Manifest: remoteCatalogTunnelManifest(types.RemoteCatalogConfig{
-							FixedURL:   "https://other.example.com/mcp",
-							TunnelName: "mcptunnel-office",
-						}),
-					}},
+					ComponentServers: []types.CatalogComponentServer{{CatalogEntryID: "remote"}},
 				},
 			},
-			wantErr: "componentServers[0]",
 		},
 	}
 

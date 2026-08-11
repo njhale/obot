@@ -228,46 +228,26 @@ func formatMCPTunnelCatalogEntryReference(entry v1.MCPServerCatalogEntry) string
 	return fmt.Sprintf("%q (%s)", displayName, entry.Name)
 }
 
+// catalogEntryManifestTunnelTargets returns the URLs a catalog entry reaches through the named
+// tunnel. A composite has none of its own: its components are separate entries, each reported
+// under its own name.
 func catalogEntryManifestTunnelTargets(manifest types.MCPServerCatalogEntryManifest, tunnelName string) []string {
-	switch manifest.Runtime {
-	case types.RuntimeRemote:
-		if manifest.RemoteConfig == nil || manifest.RemoteConfig.TunnelName != tunnelName {
-			return nil
-		}
-		if manifest.RemoteConfig.FixedURL != "" {
-			return []string{manifest.RemoteConfig.FixedURL}
-		}
-		if manifest.RemoteConfig.Hostname != "" {
-			return []string{manifest.RemoteConfig.Hostname}
-		}
-	case types.RuntimeComposite:
-		if manifest.CompositeConfig == nil {
-			return nil
-		}
-		var targets []string
-		for _, component := range manifest.CompositeConfig.ComponentServers {
-			targets = append(targets, catalogEntryManifestTunnelTargets(component.Manifest, tunnelName)...)
-		}
-		return targets
+	if manifest.Runtime != types.RuntimeRemote || manifest.RemoteConfig == nil || manifest.RemoteConfig.TunnelName != tunnelName {
+		return nil
+	}
+	if manifest.RemoteConfig.FixedURL != "" {
+		return []string{manifest.RemoteConfig.FixedURL}
+	}
+	if manifest.RemoteConfig.Hostname != "" {
+		return []string{manifest.RemoteConfig.Hostname}
 	}
 	return nil
 }
 
 func catalogEntryManifestUsesTunnel(manifest types.MCPServerCatalogEntryManifest, tunnelName string) bool {
-	switch manifest.Runtime {
-	case types.RuntimeRemote:
-		return manifest.RemoteConfig != nil && manifest.RemoteConfig.TunnelName == tunnelName
-	case types.RuntimeComposite:
-		if manifest.CompositeConfig == nil {
-			return false
-		}
-		for _, component := range manifest.CompositeConfig.ComponentServers {
-			if catalogEntryManifestUsesTunnel(component.Manifest, tunnelName) {
-				return true
-			}
-		}
-	}
-	return false
+	return manifest.Runtime == types.RuntimeRemote &&
+		manifest.RemoteConfig != nil &&
+		manifest.RemoteConfig.TunnelName == tunnelName
 }
 
 func (h *MCPTunnelHandler) RotateSecret(req api.Context) error {

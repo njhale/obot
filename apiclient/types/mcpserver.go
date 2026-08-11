@@ -101,13 +101,14 @@ type CompositeCatalogConfig struct {
 	ComponentServers []CatalogComponentServer `json:"componentServers"`
 }
 
+// CatalogComponentServer references one component of a composite catalog entry and says how its
+// tools are exposed. The component's own configuration is not held here: it belongs to the
+// catalog entry or multi-user server referenced, and is read from there.
 type CatalogComponentServer struct {
 	// CatalogEntryID if set, reference the catalog entry the component server is sourced from
 	CatalogEntryID string `json:"catalogEntryID,omitempty"`
 	// MCPServerID if set, reference the multi-user MCP server the component server proxies to
 	MCPServerID string `json:"mcpServerID,omitempty"`
-	// Manifest is the catalog entry manifest of the component server
-	Manifest MCPServerCatalogEntryManifest `json:"manifest,omitzero"`
 	// ToolOverrides restrict the tools exposed by the component server
 	ToolOverrides []ToolOverride `json:"toolOverrides,omitempty"`
 	// ToolPrefix is an optional prefix applied to the final name of each tool exposed by the component server
@@ -128,13 +129,14 @@ type CompositeRuntimeConfig struct {
 	ComponentServers []ComponentServer `json:"componentServers"`
 }
 
+// ComponentServer references one component of a composite MCP server and says how its tools are
+// exposed. The component's own configuration is not held here: it belongs to the MCP server the
+// component materializes into, and is read from there.
 type ComponentServer struct {
 	// CatalogEntryID if set, reference the catalog entry the component server is sourced from
 	CatalogEntryID string `json:"catalogEntryID,omitempty"`
 	// MCPServerID if set, reference the multi-user MCP server the component server proxies to
 	MCPServerID string `json:"mcpServerID,omitempty"`
-	// Manifest is the runtime manifest of the component server
-	Manifest MCPServerManifest `json:"manifest,omitzero"`
 	// ToolOverrides restrict the tools exposed by the component server
 	ToolOverrides []ToolOverride `json:"toolOverrides,omitempty"`
 	// ToolPrefix is an optional prefix applied to the final name of each tool exposed by the component server
@@ -603,7 +605,6 @@ func (m MCPServerManifest) ConvertToCatalogEntry() MCPServerCatalogEntryManifest
 				componentServers[i] = CatalogComponentServer{
 					CatalogEntryID: comp.CatalogEntryID,
 					MCPServerID:    comp.MCPServerID,
-					Manifest:       comp.Manifest.ConvertToCatalogEntry(),
 					ToolOverrides:  comp.ToolOverrides,
 					ToolPrefix:     comp.ToolPrefix,
 				}

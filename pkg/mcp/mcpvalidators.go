@@ -792,15 +792,6 @@ func (v CompositeValidator) ValidateConfig(_ context.Context, manifest types.MCP
 			}
 		}
 
-		// Prevent composite MCP servers from being nested
-		if component.Manifest.Runtime == types.RuntimeComposite {
-			return types.RuntimeValidationError{
-				Runtime: types.RuntimeComposite,
-				Field:   fmt.Sprintf("compositeConfig.componentServers[%d].manifest.runtime", i),
-				Message: "runtime cannot be composite",
-			}
-		}
-
 		// Validate the tool prefix
 		prefix := component.ToolPrefix
 		if prefix != "" {
@@ -932,23 +923,6 @@ func (v CompositeValidator) ValidateCatalogConfig(_ context.Context, manifest ty
 				Runtime: types.RuntimeComposite,
 				Field:   fmt.Sprintf("compositeConfig.componentServers[%d]", i),
 				Message: "must have one of catalogEntryID or mcpServerID set",
-			}
-		}
-
-		if hasCatalogEntry && component.Manifest.ServerUserType == types.ServerUserTypeMultiUser {
-			return types.RuntimeValidationError{
-				Runtime: types.RuntimeComposite,
-				Field:   fmt.Sprintf("compositeConfig.componentServers[%d]", i),
-				Message: "multi-user catalog entries cannot be included in a composite server; use the multi-user MCP server instead",
-			}
-		}
-
-		// Prevent composite MCP servers from being nested
-		if component.Manifest.Runtime == types.RuntimeComposite {
-			return types.RuntimeValidationError{
-				Runtime: types.RuntimeComposite,
-				Field:   fmt.Sprintf("compositeConfig.componentServers[%d].manifest.runtime", i),
-				Message: "runtime cannot be composite",
 			}
 		}
 
@@ -1152,36 +1126,6 @@ func validateMCPResourceMaximums(resources *types.MCPResourceRequirements, maxim
 	return maximums.Validate(*coreResources)
 }
 
-// validateCompositeServerResourceMaximums validates the resource maximums for a composite server.
-// No-op if the server is not a composite server.
-func validateCompositeServerResourceMaximums(manifest types.MCPServerManifest, maximums ResourceMaximums) error {
-	if maximums.Empty() || manifest.CompositeConfig == nil {
-		return nil
-	}
-
-	for _, component := range manifest.CompositeConfig.ComponentServers {
-		if err := validateMCPResourceMaximums(component.Manifest.Resources, maximums); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// validateCompositeCatalogEntryResourceMaximums validates the resource maximums for a composite catalog entry.
-// No-op if the catalog entry is not a composite entry.
-func validateCompositeCatalogEntryResourceMaximums(manifest types.MCPServerCatalogEntryManifest, maximums ResourceMaximums) error {
-	if maximums.Empty() || manifest.CompositeConfig == nil {
-		return nil
-	}
-
-	for _, component := range manifest.CompositeConfig.ComponentServers {
-		if err := validateMCPResourceMaximums(component.Manifest.Resources, maximums); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func ValidateServerManifest(ctx context.Context, manifest types.MCPServerManifest, isMultiUser bool, options ValidationOptions) error {
 	if err := validateMCPResourceRequirements(manifest.Runtime, manifest.Resources); err != nil {
 		return err
@@ -1198,10 +1142,6 @@ func ValidateServerManifest(ctx context.Context, manifest types.MCPServerManifes
 		}
 	}
 	if err := validateRuntimeStartupTimeout(manifest.Runtime, manifest.RuntimeStartupTimeoutSeconds()); err != nil {
-		return err
-	}
-
-	if err := validateCompositeServerResourceMaximums(manifest, options.ResourceMaximums); err != nil {
 		return err
 	}
 
@@ -1272,10 +1212,6 @@ func ValidateCatalogEntryManifest(ctx context.Context, manifest types.MCPServerC
 		return err
 	}
 
-	if err := validateCompositeCatalogEntryResourceMaximums(manifest, options.ResourceMaximums); err != nil {
-		return err
-	}
-
 	if gitManaged {
 		if err := validateGitManagedCatalogEntryManifest(manifest); err != nil {
 			return err
@@ -1323,19 +1259,6 @@ func validateCatalogSyncedTunnelName(manifest types.MCPServerCatalogEntryManifes
 			Runtime: manifest.Runtime,
 			Field:   fieldPrefix + "remoteConfig.tunnelName",
 			Message: "cannot be set on catalog-synced entries",
-		}
-	}
-
-	if manifest.CompositeConfig == nil {
-		return nil
-	}
-
-	for i, component := range manifest.CompositeConfig.ComponentServers {
-		if err := validateCatalogSyncedTunnelName(
-			component.Manifest,
-			fmt.Sprintf("%scompositeConfig.componentServers[%d].manifest.", fieldPrefix, i),
-		); err != nil {
-			return err
 		}
 	}
 
@@ -1565,13 +1488,6 @@ func validateNoAdminAddedCatalogBindings(manifest types.MCPServerCatalogEntryMan
 		for _, h := range manifest.RemoteConfig.Headers {
 			if h.SecretBinding != nil && h.SecretBinding.AdminAdded {
 				return fmt.Errorf("header %q: secretBinding.adminAdded is not valid for catalog entry", h.Key)
-			}
-		}
-	}
-	if manifest.CompositeConfig != nil {
-		for _, component := range manifest.CompositeConfig.ComponentServers {
-			if err := validateNoAdminAddedCatalogBindings(component.Manifest); err != nil {
-				return err
 			}
 		}
 	}

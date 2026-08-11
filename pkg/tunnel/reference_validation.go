@@ -11,70 +11,45 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// ValidateCatalogEntryTunnelReferences verifies every tunnel reference in a
-// catalog manifest, including remote components embedded in a composite.
+// ValidateCatalogEntryTunnelReferences verifies the tunnel reference in a catalog manifest.
+// A composite's components are validated against their own source, so it has none of its own.
 func ValidateCatalogEntryTunnelReferences(ctx context.Context, client kclient.Client, manifest types.MCPServerCatalogEntryManifest) error {
-	switch manifest.Runtime {
-	case types.RuntimeRemote:
-		if manifest.RemoteConfig == nil || manifest.RemoteConfig.TunnelName == "" {
-			return nil
-		}
-		if manifest.RemoteConfig.URLTemplate != "" {
-			return fmt.Errorf("remoteConfig.tunnelName cannot be used with remoteConfig.urlTemplate")
-		}
-
-		target := manifest.RemoteConfig.FixedURL
-		if target == "" {
-			target = manifest.RemoteConfig.Hostname
-		}
-		if target == "" {
-			return fmt.Errorf("remoteConfig.tunnelName requires a fixedURL or hostname")
-		}
-		return ValidateReference(ctx, client, manifest.RemoteConfig.TunnelName, target)
-	case types.RuntimeComposite:
-		if manifest.CompositeConfig == nil {
-			return nil
-		}
-		for i, component := range manifest.CompositeConfig.ComponentServers {
-			if err := ValidateCatalogEntryTunnelReferences(ctx, client, component.Manifest); err != nil {
-				return fmt.Errorf("compositeConfig.componentServers[%d]: %w", i, err)
-			}
-		}
+	if manifest.Runtime != types.RuntimeRemote || manifest.RemoteConfig == nil || manifest.RemoteConfig.TunnelName == "" {
+		return nil
 	}
-	return nil
+	if manifest.RemoteConfig.URLTemplate != "" {
+		return fmt.Errorf("remoteConfig.tunnelName cannot be used with remoteConfig.urlTemplate")
+	}
+
+	target := manifest.RemoteConfig.FixedURL
+	if target == "" {
+		target = manifest.RemoteConfig.Hostname
+	}
+	if target == "" {
+		return fmt.Errorf("remoteConfig.tunnelName requires a fixedURL or hostname")
+	}
+	return ValidateReference(ctx, client, manifest.RemoteConfig.TunnelName, target)
 }
 
-// ValidateServerTunnelReferences verifies every tunnel reference in a runtime
-// server manifest, including remote components embedded in a composite.
+// ValidateServerTunnelReferences verifies the tunnel reference in a runtime server manifest.
+// A composite's components are validated as the servers they materialize into, so it has none
+// of its own.
 func ValidateServerTunnelReferences(ctx context.Context, client kclient.Client, manifest types.MCPServerManifest) error {
-	switch manifest.Runtime {
-	case types.RuntimeRemote:
-		if manifest.RemoteConfig == nil || manifest.RemoteConfig.TunnelName == "" {
-			return nil
-		}
-		if manifest.RemoteConfig.IsTemplate || manifest.RemoteConfig.URLTemplate != "" {
-			return fmt.Errorf("remoteConfig.tunnelName cannot be used with a URL template")
-		}
-
-		target := manifest.RemoteConfig.URL
-		if target == "" {
-			target = manifest.RemoteConfig.Hostname
-		}
-		if target == "" {
-			return fmt.Errorf("remoteConfig.tunnelName requires a URL or hostname")
-		}
-		return ValidateReference(ctx, client, manifest.RemoteConfig.TunnelName, target)
-	case types.RuntimeComposite:
-		if manifest.CompositeConfig == nil {
-			return nil
-		}
-		for i, component := range manifest.CompositeConfig.ComponentServers {
-			if err := ValidateServerTunnelReferences(ctx, client, component.Manifest); err != nil {
-				return fmt.Errorf("compositeConfig.componentServers[%d]: %w", i, err)
-			}
-		}
+	if manifest.Runtime != types.RuntimeRemote || manifest.RemoteConfig == nil || manifest.RemoteConfig.TunnelName == "" {
+		return nil
 	}
-	return nil
+	if manifest.RemoteConfig.IsTemplate || manifest.RemoteConfig.URLTemplate != "" {
+		return fmt.Errorf("remoteConfig.tunnelName cannot be used with a URL template")
+	}
+
+	target := manifest.RemoteConfig.URL
+	if target == "" {
+		target = manifest.RemoteConfig.Hostname
+	}
+	if target == "" {
+		return fmt.Errorf("remoteConfig.tunnelName requires a URL or hostname")
+	}
+	return ValidateReference(ctx, client, manifest.RemoteConfig.TunnelName, target)
 }
 
 // ValidateReference checks that name identifies an MCPTunnel whose current

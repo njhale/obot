@@ -189,9 +189,13 @@
 		return c.catalogEntryID || c.mcpServerID || '';
 	}
 
-	// Build a configuring entry for a component. A component's configuration always comes from
-	// its live source, so this resolves the referenced entry or server rather than any copy held
-	// by the composite.
+	// A component's configuration always comes from its live source. Undefined until that source
+	// has loaded, so callers fall back to the component ID for display.
+	function componentSource(componentId: string): MCPCatalogEntry | MCPCatalogServer | undefined {
+		return componentServers.get(componentId) || componentEntries.find((e) => e.id === componentId);
+	}
+
+	// Build a configuring entry for a component, resolved from its live source.
 	function buildCompositeConfiguringEntry(
 		componentId: string
 	): MCPCatalogEntry | MCPCatalogServer | undefined {
@@ -352,19 +356,20 @@
 			{#each config.componentServers as entry (getComponentId(entry))}
 				{@const componentId = getComponentId(entry)}
 				{@const headerSeverity = componentSeverity(entry)}
-				{@const deprecated = isDeprecatedMCPServer(entry)}
+				{@const source = componentSource(componentId)}
+				{@const deprecated = isDeprecatedMCPServer(source)}
 				<div
 					class="dark:bg-base-300 dark:border-base-400 rounded-lg border border-gray-200 bg-gray-50"
 				>
 					<div class="flex items-center gap-3 p-3">
-						{#if entry.manifest?.icon}
-							<img src={entry.manifest.icon} alt={entry.manifest.name} class="size-8" />
+						{#if source?.manifest?.icon}
+							<img src={source.manifest.icon} alt={source.manifest.name} class="size-8" />
 						{:else}
 							<Server class="text-muted-content size-8" />
 						{/if}
 						<div class="flex min-w-0 flex-1 items-center gap-1.5">
-							<div class="truncate font-medium" title={entry.manifest?.name || 'Unnamed Server'}>
-								{entry.manifest?.name || 'Unnamed Server'}
+							<div class="truncate font-medium" title={source?.manifest?.name || componentId}>
+								{source?.manifest?.name || componentId}
 							</div>
 							<McpDeprecatedNotice {deprecated} child />
 							{#if headerSeverity}

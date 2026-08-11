@@ -426,7 +426,7 @@ func (h *MCPCatalogHandler) CreateEntry(req api.Context) error {
 	}
 	// Handle composite catalog entries
 	if manifest.Runtime == types.RuntimeComposite && manifest.CompositeConfig != nil {
-		if err := h.populateComponentManifests(req, &manifest, catalogName, workspaceID); err != nil {
+		if err := pruneUnresolvedComponents(req, &manifest, catalogName, workspaceID); err != nil {
 			return err
 		}
 	}
@@ -1068,8 +1068,18 @@ func (h *MCPCatalogHandler) generateCompositeToolPreviews(req api.Context, entry
 		return err
 	}
 
-	compositeToolPreviews := make([]types.MCPServerTool, 0, len(compositeConfig.ComponentServers))
-	for _, componentEntry := range compositeConfig.ComponentServers {
+	resolved, err := mcp.ResolveComponents(req.Context(), req.Storage, entry.Namespace, compositeConfig.ComponentServers)
+	if err != nil {
+		return err
+	}
+
+	compositeToolPreviews := make([]types.MCPServerTool, 0, len(resolved))
+	for _, component := range resolved {
+		if component.Unresolved() {
+			continue
+		}
+		componentEntry := component.Ref
+
 		// If this component references an existing MCPServer, list its tools directly
 		// (as we do for multi-user servers) instead of creating a temporary server.
 		if componentEntry.MCPServerID != "" {
@@ -1120,7 +1130,7 @@ func (h *MCPCatalogHandler) generateCompositeToolPreviews(req api.Context, entry
 			entry.Namespace,
 			entry.Name,
 			catalogName,
-			componentEntry.Manifest,
+			component.CatalogEntryManifest(),
 			config.Config,
 			config.URL,
 			h.serverURL,
@@ -1313,6 +1323,12 @@ func (h *MCPCatalogHandler) GenerateComponentToolPreviews(req api.Context) error
 		return types.NewErrBadRequest("component not found in composite entry")
 	}
 
+	// The component's configuration lives on the catalog entry it references.
+	var componentEntry v1.MCPServerCatalogEntry
+	if err := req.Get(&componentEntry, componentID); err != nil {
+		return fmt.Errorf("failed to get component catalog entry: %w", err)
+	}
+
 	// Multi-user components use the multi-user tools API and should not call this endpoint.
 	if component.MCPServerID != "" {
 		return types.NewErrBadRequest("multi-user server components are not supported by this endpoint")
@@ -1336,7 +1352,6 @@ func (h *MCPCatalogHandler) GenerateComponentToolPreviews(req api.Context) error
 		return err
 	}
 
-	// Use the manifest snapshot embedded in the composite entry for this component.
 	server, serverConfig, err := tempServerAndConfig(
 		req.Context(),
 		req.GatewayClient,
@@ -1347,7 +1362,7 @@ func (h *MCPCatalogHandler) GenerateComponentToolPreviews(req api.Context) error
 		composite.Namespace,
 		composite.Name,
 		catalogName,
-		component.Manifest,
+		componentEntry.Spec.Manifest,
 		configRequest.Config,
 		configRequest.URL,
 		h.serverURL,
@@ -1377,27 +1392,15 @@ func (h *MCPCatalogHandler) GenerateComponentToolPreviews(req api.Context) error
 		return fmt.Errorf("failed to generate tool preview: %w", err)
 	}
 
-	// Return the tool previews on a skeleton entry
-	// We don't bother adding these to the real entry because:
-	// - it may no longer exist
-	// - we already have enough information to generate composite tool overrides for the component
-	entry := v1.MCPServerCatalogEntry{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      component.CatalogEntryID,
-			Namespace: composite.Namespace,
-		},
-		Spec: v1.MCPServerCatalogEntrySpec{
-			MCPCatalogName: composite.Spec.MCPCatalogName,
-			Manifest:       component.Manifest,
-		},
-	}
-	entry.Spec.Manifest.ToolPreview = toolPreviews
+	// Return the previews on the component entry without persisting them: the caller only needs
+	// them to pick tool overrides for the composite.
+	componentEntry.Spec.Manifest.ToolPreview = toolPreviews
 
-	return req.Write(ConvertMCPServerCatalogEntry(entry, h.serverURL))
+	return req.Write(ConvertMCPServerCatalogEntry(componentEntry, h.serverURL))
 }
 
 // GenerateComponentToolPreviewsOAuthURL returns an OAuth URL for a single component of a
-// composite catalog entry, using the component manifest snapshot embedded in the composite.
+// composite catalog entry, using the catalog entry the component references.
 func (h *MCPCatalogHandler) GenerateComponentToolPreviewsOAuthURL(req api.Context) error {
 	var (
 		catalogName = req.PathValue("catalog_id")
@@ -1446,6 +1449,12 @@ func (h *MCPCatalogHandler) GenerateComponentToolPreviewsOAuthURL(req api.Contex
 		return types.NewErrBadRequest("component not found in composite entry")
 	}
 
+	// The component's configuration lives on the catalog entry it references.
+	var componentEntry v1.MCPServerCatalogEntry
+	if err := req.Get(&componentEntry, componentID); err != nil {
+		return fmt.Errorf("failed to get component catalog entry: %w", err)
+	}
+
 	if component.MCPServerID != "" {
 		return types.NewErrBadRequest("multi-user server components are not supported by this endpoint")
 	}
@@ -1478,7 +1487,7 @@ func (h *MCPCatalogHandler) GenerateComponentToolPreviewsOAuthURL(req api.Contex
 		composite.Namespace,
 		composite.Name,
 		catalogName,
-		component.Manifest,
+		componentEntry.Spec.Manifest,
 		configRequest.Config,
 		configRequest.URL,
 		h.serverURL,
@@ -1530,16 +1539,18 @@ func (h *MCPCatalogHandler) generateCompositeOAuthURLs(req api.Context, entry v1
 		return err
 	}
 
-	for _, componentEntry := range compositeConfig.ComponentServers {
-		if componentEntry.MCPServerID != "" {
+	resolved, err := mcp.ResolveComponents(req.Context(), req.Storage, entry.Namespace, compositeConfig.ComponentServers)
+	if err != nil {
+		return err
+	}
+
+	for _, component := range resolved {
+		if component.Ref.MCPServerID != "" || component.Unresolved() {
 			// Skip multi-user server components when checking for OAuth URLs
 			continue
 		}
 
-		componentID := componentEntry.CatalogEntryID
-		if componentID == "" {
-			componentID = componentEntry.MCPServerID
-		}
+		componentID := component.Ref.CatalogEntryID
 
 		config, ok := configRequest.ComponentConfigs[componentID]
 		if !ok {
@@ -1552,8 +1563,10 @@ func (h *MCPCatalogHandler) generateCompositeOAuthURLs(req api.Context, entry v1
 			continue
 		}
 
+		componentManifest := component.CatalogEntryManifest()
+
 		// Only check OAuth for remote components
-		if componentEntry.Manifest.Runtime != types.RuntimeRemote {
+		if componentManifest.Runtime != types.RuntimeRemote {
 			delete(oauthURLs, componentID)
 			continue
 		}
@@ -1568,7 +1581,7 @@ func (h *MCPCatalogHandler) generateCompositeOAuthURLs(req api.Context, entry v1
 			entry.Namespace,
 			entry.Name,
 			catalogName,
-			componentEntry.Manifest,
+			componentManifest,
 			config.Config,
 			config.URL,
 			h.serverURL,
@@ -1774,7 +1787,9 @@ func normalizeMCPCatalogEntryName(name string) string {
 	return name
 }
 
-func (h *MCPCatalogHandler) populateComponentManifests(req api.Context, manifest *types.MCPServerCatalogEntryManifest, catalogName, workspaceID string) error {
+// pruneUnresolvedComponents validates a composite entry's component references and drops the
+// ones whose source does not exist, so a composite is never stored pointing at nothing.
+func pruneUnresolvedComponents(req api.Context, manifest *types.MCPServerCatalogEntryManifest, catalogName, workspaceID string) error {
 	// Composite entries are catalog-scoped for now.
 	if workspaceID != "" {
 		return types.NewErrBadRequest("composite catalog entries are not supported in power user workspaces")
@@ -1786,21 +1801,18 @@ func (h *MCPCatalogHandler) populateComponentManifests(req api.Context, manifest
 	}
 
 	// Left nil when every component is dropped, so the stored manifest keeps marshalling
-	// identically to before and does not register as drift.
+	// identically to before.
 	var componentServers []types.CatalogComponentServer
 	for _, component := range resolved {
 		if err := mcp.ValidateComponent(component, catalogName, workspaceID); err != nil {
 			return types.NewErrBadRequest("%v", err)
 		}
 
-		// Drop components whose source no longer exists.
 		if component.Unresolved() {
 			continue
 		}
 
-		keep := component.Ref
-		keep.Manifest = component.CatalogEntryManifest()
-		componentServers = append(componentServers, keep)
+		componentServers = append(componentServers, component.Ref)
 	}
 
 	manifest.CompositeConfig.ComponentServers = componentServers
