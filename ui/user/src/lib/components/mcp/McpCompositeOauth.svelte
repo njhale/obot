@@ -31,9 +31,7 @@
 	let error = $state<string>('');
 
 	const allAuthenticated = $derived(pending.length === 0);
-	const componentServers = $derived(
-		compositeServer?.manifest?.compositeConfig?.componentServers || []
-	);
+	const componentServers = $derived(compositeServer?.components || []);
 	const enabledCount = $derived(
 		componentServers.filter((c) => (c?.disabled ?? false) === false).length
 	);
@@ -49,15 +47,8 @@
 		try {
 			compositeServer = await UserService.getSingleOrRemoteMcpServer(compositeMcpId);
 
-			const componentServers = compositeServer?.manifest?.compositeConfig?.componentServers || [];
-			componentInfos = componentServers.reduce(
-				(
-					acc: Record<string, { name?: string; icon?: string; deprecated?: boolean }>,
-					c: {
-						catalogEntryID?: string;
-						manifest?: { name?: string; icon?: string; metadata?: { deprecated?: string } };
-					}
-				) => {
+			componentInfos = (compositeServer?.components || []).reduce(
+				(acc: Record<string, { name?: string; icon?: string; deprecated?: boolean }>, c) => {
 					const id = c.catalogEntryID;
 					if (!id) return acc;
 					acc[id] = {

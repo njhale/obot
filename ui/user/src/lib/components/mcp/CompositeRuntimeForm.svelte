@@ -189,14 +189,14 @@
 		return c.catalogEntryID || c.mcpServerID || '';
 	}
 
-	// Build a configuring entry backed by the composite's manifest snapshot when
-	// configuring tools for an existing entry
+	// Build a configuring entry for a component. A component's configuration always comes from
+	// its live source, so this resolves the referenced entry or server rather than any copy held
+	// by the composite.
 	function buildCompositeConfiguringEntry(
 		componentId: string
 	): MCPCatalogEntry | MCPCatalogServer | undefined {
 		const component = config.componentServers?.find((c) => getComponentId(c) === componentId);
-		if (!component || !component.manifest || (!component.catalogEntryID && !component.mcpServerID))
-			return undefined;
+		if (!component || (!component.catalogEntryID && !component.mcpServerID)) return undefined;
 
 		if (component.mcpServerID) {
 			// This is a multi-user server, we should always use the live value since they should always exist
@@ -206,25 +206,8 @@
 			throw new Error(`Catalog server not found for ID: ${component.mcpServerID}`);
 		}
 
-		const catalogEntry = componentEntries.find((e) => e.id === componentId);
-		if (catalogEntry) {
-			return {
-				...catalogEntry,
-				manifest: component.manifest
-			};
-		}
-
-		// Fallback minimal entry if metadata isn't loaded; sufficient for Configure Tools.
-		return {
-			id: componentId,
-			created: new Date().toISOString(),
-			manifest: component.manifest,
-			sourceURL: undefined,
-			userCount: undefined,
-			type: 'catalog-entry',
-			isCatalogEntry: !component.mcpServerID,
-			needsUpdate: false
-		};
+		// Undefined until the referenced entry has loaded; the caller keeps the dialog closed.
+		return componentEntries.find((e) => e.id === componentId);
 	}
 
 	// Check if a component is newly added (not yet persisted to the composite entry)
@@ -261,9 +244,7 @@
 			if (!overrides.length) continue;
 
 			const componentId = getComponentId(component);
-			const manifestPreview = component.manifest?.toolPreview || [];
-			const entryPreview = entryById.get(componentId)?.manifest?.toolPreview || [];
-			const preview = manifestPreview.length ? manifestPreview : entryPreview;
+			const preview = entryById.get(componentId)?.manifest?.toolPreview || [];
 
 			// If overrides exist, only show those overrides (use preview to enrich descriptions when present)
 			// Preview of all tools should only be used when user explicitly populates for the first time

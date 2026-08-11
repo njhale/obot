@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import { componentsById, getComponentId } from '$lib/composite';
 	import { ADMIN_SESSION_STORAGE, DEFAULT_MCP_CATALOG_ID } from '$lib/constants';
 	import {
 		AdminService,
@@ -9,7 +10,6 @@
 		type OrgUser
 	} from '$lib/services';
 	import { isDeprecatedMCPServer } from '$lib/services/user/mcp';
-	import { componentsById, getComponentId } from '$lib/composite';
 	import { profile } from '$lib/stores';
 	import { openUrl } from '$lib/utils';
 	import McpDeprecatedNotice from '../mcp/McpDeprecatedNotice.svelte';

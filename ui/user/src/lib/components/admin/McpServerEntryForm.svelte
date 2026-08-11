@@ -585,7 +585,7 @@
 		if (!entry) return;
 
 		if (entry.manifest?.runtime === 'composite') {
-			const comps = entry.manifest?.compositeConfig?.componentServers || [];
+			const comps = entry.components || [];
 			const componentConfigs: Record<string, ComponentLaunchFormData> = {};
 			for (const c of comps) {
 				// Use catalogEntryID when present (catalog-based component), otherwise fall
@@ -1463,7 +1463,7 @@
 				Multiple components require authentication. Please authenticate each component below:
 			</p>
 			{#each Object.entries(oauthURLs).filter(([id]) => !authenticatedComponents.has(id)) as [componentId, url] (componentId)}
-				{@const component = entry?.manifest?.compositeConfig?.componentServers?.find(
+				{@const component = entry?.components?.find(
 					(c) => c.catalogEntryID === componentId || c.mcpServerID === componentId
 				)}
 				{@const componentName = component?.manifest?.name || componentId}

@@ -119,13 +119,14 @@ export function hasEditableConfiguration(
 	item: MCPCatalogEntry | MCPCatalogServer | SystemMCPServerCatalogEntry
 ) {
 	if (!item.manifest) return false;
-	// For composite servers, check if any component has editable configuration
-	if ('compositeConfig' in item.manifest && item.manifest.runtime === 'composite') {
-		const componentServers = item.manifest.compositeConfig?.componentServers || [];
-		return componentServers.some((component) => {
+	// Composite components carry their configuration on the resolved components of the parent,
+	// not inside the composite's own manifest.
+	if (item.manifest.runtime === 'composite') {
+		const components = 'components' in item ? (item.components ?? []) : [];
+		return components.some((component) => {
 			const hasEnvs = hasEditableFields(component.manifest?.env);
 			const hasHeaders =
-				(component?.manifest?.remoteConfig?.headers?.filter?.(
+				(component.manifest?.remoteConfig?.headers?.filter?.(
 					(header) => !header.value && !hasSecretBinding(header)
 				)?.length ?? 0) > 0;
 			const hasUrlToFill = hasEditableURL(component.manifest?.remoteConfig);
@@ -149,21 +150,21 @@ type SecretBindingManifest = {
 		headers?: MCPSubField[];
 	};
 	runtime?: string;
-	compositeConfig?: {
-		componentServers?: {
-			manifest?: SecretBindingManifest;
-		}[];
-	};
 };
 
-export function manifestHasSecretBindings(manifest?: SecretBindingManifest | null): boolean {
+/**
+ * Composite components are passed separately because a composite's manifest holds only
+ * references; each component's configuration is resolved from its source when the parent is read.
+ */
+export function manifestHasSecretBindings(
+	manifest?: SecretBindingManifest | null,
+	components?: { manifest?: SecretBindingManifest }[]
+): boolean {
 	if (!manifest) return false;
 	if ((manifest.env ?? []).some(hasSecretBinding)) return true;
 	if ((manifest.remoteConfig?.headers ?? []).some(hasSecretBinding)) return true;
 	if (manifest.runtime === 'composite') {
-		return (manifest.compositeConfig?.componentServers ?? []).some((component) =>
-			manifestHasSecretBindings(component.manifest)
-		);
+		return (components ?? []).some((component) => manifestHasSecretBindings(component.manifest));
 	}
 	return false;
 }
@@ -201,9 +202,10 @@ export function isKubernetesRuntimeBackend(engine?: string | null): boolean {
 }
 
 export function getSecretBindingEngineError(
-	manifest?: SecretBindingManifest | null
+	manifest?: SecretBindingManifest | null,
+	components?: { manifest?: SecretBindingManifest }[]
 ): string | undefined {
-	if (!manifestHasSecretBindings(manifest)) return undefined;
+	if (!manifestHasSecretBindings(manifest, components)) return undefined;
 	return 'This MCP server uses Kubernetes Secret bindings and can only be launched when Obot is using the Kubernetes engine.';
 }
 
@@ -532,12 +534,10 @@ export async function convertCompositeInfoToLaunchFormData(
 			{ config: Record<string, string>; url?: string; disabled?: boolean }
 		>;
 	}
-	// Prefer existing server's runtime composite manifest for edit flows;
-	// fall back to parent catalog entry only if server lacks composite config
+	// Prefer the deployed server's resolved components for edit flows, falling back to the
+	// parent catalog entry's when there is no server yet.
 	const components =
-		server?.manifest?.compositeConfig?.componentServers ||
-		(parent && 'manifest' in parent ? parent?.manifest?.compositeConfig?.componentServers : []) ||
-		[];
+		server?.components || (parent && 'components' in parent ? parent.components : []) || [];
 	const componentConfigs: Record<
 		string,
 		{

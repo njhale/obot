@@ -323,7 +323,7 @@
 		configureFormTitle = undefined;
 		// For composite: open form first to collect per-component URLs before creating
 		if (item.manifest.runtime === 'composite') {
-			const components = item.manifest?.compositeConfig?.componentServers || [];
+			const components = item.components || [];
 			const componentConfigs: Record<
 				string,
 				{
