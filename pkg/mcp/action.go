@@ -13,6 +13,7 @@ import (
 	gatewaytypes "github.com/obot-platform/obot/pkg/gateway/types"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
+	"github.com/obot-platform/obot/pkg/tunnel"
 	"github.com/obot-platform/obot/pkg/utils"
 	"github.com/obot-platform/obot/pkg/wait"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -80,19 +81,52 @@ func (sm *SessionManager) ServerForAction(ctx context.Context, id, userID string
 }
 
 func (sm *SessionManager) serverOrInstanceFromConnectURL(ctx context.Context, id, userID string) (v1.MCPServer, v1.MCPServerInstance, error) {
+	validationOptions, err := sm.ValidationOptions(ctx, sm.storageClient)
+	if err != nil {
+		return v1.MCPServer{}, v1.MCPServerInstance{}, err
+	}
+
+	return ServerOrInstanceFromConnectURL(ctx, sm.storageClient, sm.localK8sClient, ConnectURLOptions{
+		ID:                        id,
+		UserID:                    userID,
+		ObotNamespace:             sm.obotNamespace,
+		SecretBindingAllowedLabel: sm.secretBindingAllowedLabel,
+		ValidationOptions:         validationOptions,
+	})
+}
+
+// ConnectURLOptions carries the per-caller context ServerOrInstanceFromConnectURL needs.
+type ConnectURLOptions struct {
+	// ID is an MCP server, server instance, or catalog entry name taken from a connect URL.
+	ID string
+	// UserID is the user connecting.
+	UserID string
+	// ObotNamespace holds the Kubernetes Secrets that bindings reference.
+	ObotNamespace string
+	// SecretBindingAllowedLabel restricts which of those Secrets may be bound.
+	SecretBindingAllowedLabel string
+	// ValidationOptions are applied to a server manifest derived from a catalog entry.
+	ValidationOptions ValidationOptions
+}
+
+// ServerOrInstanceFromConnectURL resolves the ID in a connect URL to the MCP server or server
+// instance the user connects through, creating one from a catalog entry if the user has none yet.
+func ServerOrInstanceFromConnectURL(ctx context.Context, c kclient.WithWatch, localK8sClient kclient.Client, opts ConnectURLOptions) (v1.MCPServer, v1.MCPServerInstance, error) {
+	id, userID := opts.ID, opts.UserID
+
 	switch {
 	case system.IsMCPServerInstanceID(id):
 		var instance v1.MCPServerInstance
-		return v1.MCPServer{}, instance, sm.storageClient.Get(ctx, kclient.ObjectKey{Namespace: system.DefaultNamespace, Name: id}, &instance)
+		return v1.MCPServer{}, instance, c.Get(ctx, kclient.ObjectKey{Namespace: system.DefaultNamespace, Name: id}, &instance)
 	case system.IsMCPServerID(id):
 		var server v1.MCPServer
-		if err := sm.storageClient.Get(ctx, kclient.ObjectKey{Namespace: system.DefaultNamespace, Name: id}, &server); err != nil {
+		if err := c.Get(ctx, kclient.ObjectKey{Namespace: system.DefaultNamespace, Name: id}, &server); err != nil {
 			return v1.MCPServer{}, v1.MCPServerInstance{}, err
 		}
 
 		if !server.Spec.IsSingleUser() {
 			var instances v1.MCPServerInstanceList
-			if err := sm.storageClient.List(ctx, &instances,
+			if err := c.List(ctx, &instances,
 				kclient.InNamespace(system.DefaultNamespace),
 				kclient.MatchingFields{
 					"spec.mcpServerName": id,
@@ -118,7 +152,7 @@ func (sm *SessionManager) serverOrInstanceFromConnectURL(ctx context.Context, id
 						MultiUserConfig:           server.Spec.Manifest.MultiUserConfig,
 					},
 				}
-				if err := sm.storageClient.Create(ctx, &instance); err != nil {
+				if err := c.Create(ctx, &instance); err != nil {
 					return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrNotFound("user has not configured an instance of MCP server %s", id)
 				}
 
@@ -135,13 +169,13 @@ func (sm *SessionManager) serverOrInstanceFromConnectURL(ctx context.Context, id
 		return server, v1.MCPServerInstance{}, nil
 	default:
 		var entry v1.MCPServerCatalogEntry
-		if err := sm.storageClient.Get(ctx, kclient.ObjectKey{Namespace: system.DefaultNamespace, Name: id}, &entry); err != nil {
+		if err := c.Get(ctx, kclient.ObjectKey{Namespace: system.DefaultNamespace, Name: id}, &entry); err != nil {
 			return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrNotFound("catalog entry %s not found", id)
 		}
 		AddExtractedEnvVarsToCatalogEntry(&entry)
 
 		var servers v1.MCPServerList
-		if err := sm.storageClient.List(ctx, &servers,
+		if err := c.List(ctx, &servers,
 			kclient.InNamespace(system.DefaultNamespace),
 			kclient.MatchingFields{
 				"spec.mcpServerCatalogEntryName": id,
@@ -153,11 +187,11 @@ func (sm *SessionManager) serverOrInstanceFromConnectURL(ctx context.Context, id
 			return v1.MCPServer{}, v1.MCPServerInstance{}, err
 		}
 		if len(servers.Items) == 0 {
-			missingAdminConfig, err := sm.entryMissingAdminConfig(ctx, entry)
+			missingAdminConfig, err := EntryMissingAdminConfig(ctx, c, localK8sClient, opts.ObotNamespace, entry, opts.SecretBindingAllowedLabel)
 			if err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, fmt.Errorf("failed to determine required admin configuration for catalog entry %s: %w", id, err)
 			}
-			if err := missingAdminConfig.err(id); err != nil {
+			if err := missingAdminConfig.Err(id); err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, err
 			}
 
@@ -166,16 +200,15 @@ func (sm *SessionManager) serverOrInstanceFromConnectURL(ctx context.Context, id
 			if err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrBadRequest("catalog entry %s cannot be connected because it could not be converted to an MCP server: %v", id, err)
 			}
-			resourceMaximums, err := sm.EffectiveKubernetesResourceMaximums(ctx, sm.storageClient)
-			if err != nil {
-				return v1.MCPServer{}, v1.MCPServerInstance{}, err
-			}
-			if err := ValidateServerManifest(ctx, manifest, false, ValidationOptions{
-				AllowMissingURL:              allowMissingURL,
-				RemoteMCPURLValidationConfig: sm.remoteURLValidationConfig,
-				ResourceMaximums:             resourceMaximums,
-			}); err != nil {
+			validationOptions := opts.ValidationOptions
+			validationOptions.AllowMissingURL = allowMissingURL
+			if err := ValidateServerManifest(ctx, manifest, false, validationOptions); err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrBadRequest("catalog entry %s cannot be connected because its MCP server manifest is invalid: %v", id, err)
+			}
+			// A tunnel reference the catalog entry can no longer satisfy would otherwise only
+			// surface when the server failed to reach its remote.
+			if err := tunnel.ValidateServerTunnelReferences(ctx, c, manifest); err != nil {
+				return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrBadRequest("catalog entry %s cannot be connected because its tunnel configuration is invalid: %v", id, err)
 			}
 
 			server := v1.MCPServer{
@@ -191,14 +224,14 @@ func (sm *SessionManager) serverOrInstanceFromConnectURL(ctx context.Context, id
 					NeedsURL:                  allowMissingURL && (manifest.RemoteConfig == nil || manifest.RemoteConfig.URL == ""),
 				},
 			}
-			if err := sm.storageClient.Create(ctx, &server); err != nil {
+			if err := c.Create(ctx, &server); err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, fmt.Errorf("failed to create MCP server for catalog entry %s: %w", id, err)
 			}
 
 			if server.Spec.Manifest.Runtime == types.RuntimeComposite &&
 				server.Spec.Manifest.CompositeConfig != nil &&
 				len(server.Spec.Manifest.CompositeConfig.ComponentServers) > 0 {
-				server, err = WaitForCompositeReady(ctx, sm.storageClient, server, 30*time.Second)
+				server, err = WaitForCompositeReady(ctx, c, server, 30*time.Second)
 				if err != nil {
 					return v1.MCPServer{}, v1.MCPServerInstance{}, fmt.Errorf("failed to wait for composite server to be ready: %w", err)
 				}
@@ -213,7 +246,7 @@ func (sm *SessionManager) serverOrInstanceFromConnectURL(ctx context.Context, id
 
 		server := servers.Items[0]
 		if SyncConnectServerRemoteConfigFromCatalogEntry(&server, entry) {
-			if err := sm.storageClient.Update(ctx, &server); err != nil {
+			if err := c.Update(ctx, &server); err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, fmt.Errorf("failed to update MCP server configuration from catalog entry %s: %w", id, err)
 			}
 		}
@@ -549,12 +582,15 @@ func ApplyMCPServerInstanceHeaderPrefix(value, prefix string) string {
 	return prefix + value
 }
 
-type missingCatalogEntryAdminConfig struct {
+// MissingCatalogEntryAdminConfig is the configuration an administrator still owes a catalog
+// entry before anyone can connect through it.
+type MissingCatalogEntryAdminConfig struct {
 	SecretBoundFields []string
 	StaticOAuth       bool
 }
 
-func (m missingCatalogEntryAdminConfig) err(entryID string) error {
+// Err returns the error to fail a connection with, or nil when nothing is missing.
+func (m MissingCatalogEntryAdminConfig) Err(entryID string) error {
 	var parts []string
 	if len(m.SecretBoundFields) > 0 {
 		parts = append(parts, fmt.Sprintf("required Kubernetes Secret bindings are missing or empty for %s", strings.Join(m.SecretBoundFields, ", ")))
@@ -568,13 +604,15 @@ func (m missingCatalogEntryAdminConfig) err(entryID string) error {
 	return types.NewErrBadRequest("catalog entry %s cannot be connected because %s", entryID, strings.Join(parts, "; "))
 }
 
-func (sm *SessionManager) entryMissingAdminConfig(ctx context.Context, entry v1.MCPServerCatalogEntry) (missingCatalogEntryAdminConfig, error) {
-	staticOAuth, err := EntryRequiresStaticOAuthCreds(ctx, sm.storageClient, entry)
+// EntryMissingAdminConfig reports the configuration an administrator still owes a catalog entry
+// before anyone can connect through it.
+func EntryMissingAdminConfig(ctx context.Context, c, localK8sClient kclient.Client, obotNamespace string, entry v1.MCPServerCatalogEntry, secretBindingAllowedLabel string) (MissingCatalogEntryAdminConfig, error) {
+	staticOAuth, err := EntryRequiresStaticOAuthCreds(ctx, c, entry)
 	if err != nil {
-		return missingCatalogEntryAdminConfig{}, err
+		return MissingCatalogEntryAdminConfig{}, err
 	}
 
-	missing := missingCatalogEntryAdminConfig{StaticOAuth: staticOAuth}
+	missing := MissingCatalogEntryAdminConfig{StaticOAuth: staticOAuth}
 
 	type manifestRef struct {
 		prefix   string
@@ -590,7 +628,7 @@ func (sm *SessionManager) entryMissingAdminConfig(ctx context.Context, entry v1.
 
 		// A composite binds no secrets itself; what it can be missing is whatever its components
 		// bind, read from the sources they reference.
-		resolved, err := ResolveComponents(ctx, sm.storageClient, entry.Namespace, m.CompositeConfig.ComponentServers)
+		resolved, err := ResolveComponents(ctx, c, entry.Namespace, m.CompositeConfig.ComponentServers)
 		if err != nil {
 			return missing, err
 		}
@@ -614,27 +652,12 @@ func (sm *SessionManager) entryMissingAdminConfig(ctx context.Context, entry v1.
 			remote = &types.RemoteRuntimeConfig{Headers: cm.RemoteConfig.Headers}
 		}
 
-		resolved, err := MergeBoundCreds(ctx, sm.localK8sClient, sm.obotNamespace, cm.Env, remote, nil, sm.secretBindingAllowedLabel)
+		missingBindings, err := MissingSecretBindings(ctx, localK8sClient, obotNamespace, cm.Env, remote, secretBindingAllowedLabel)
 		if err != nil {
 			return missing, err
 		}
-
-		for _, e := range cm.Env {
-			if e.Required && e.SecretBinding != nil {
-				if _, ok := resolved[e.Key]; !ok {
-					missing.SecretBoundFields = append(missing.SecretBoundFields, SecretBoundFieldLabel(ref.prefix, "env", e.MCPHeader))
-				}
-			}
-		}
-
-		if cm.RemoteConfig != nil {
-			for _, h := range cm.RemoteConfig.Headers {
-				if h.Required && h.SecretBinding != nil {
-					if _, ok := resolved[h.Key]; !ok {
-						missing.SecretBoundFields = append(missing.SecretBoundFields, SecretBoundFieldLabel(ref.prefix, "header", h))
-					}
-				}
-			}
+		for _, binding := range missingBindings {
+			missing.SecretBoundFields = append(missing.SecretBoundFields, SecretBoundFieldLabel(ref.prefix, binding.Kind, binding.Header))
 		}
 	}
 
