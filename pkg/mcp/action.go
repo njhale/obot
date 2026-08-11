@@ -572,9 +572,12 @@ func (m missingCatalogEntryAdminConfig) err(entryID string) error {
 }
 
 func (sm *SessionManager) entryMissingAdminConfig(ctx context.Context, entry v1.MCPServerCatalogEntry) (missingCatalogEntryAdminConfig, error) {
-	missing := missingCatalogEntryAdminConfig{
-		StaticOAuth: entryRequiresStaticOAuthCreds(entry),
+	staticOAuth, err := EntryRequiresStaticOAuthCreds(ctx, sm.storageClient, entry)
+	if err != nil {
+		return missingCatalogEntryAdminConfig{}, err
 	}
+
+	missing := missingCatalogEntryAdminConfig{StaticOAuth: staticOAuth}
 
 	type manifestRef struct {
 		prefix   string
@@ -639,13 +642,6 @@ func (sm *SessionManager) entryMissingAdminConfig(ctx context.Context, entry v1.
 	}
 
 	return missing, nil
-}
-
-func entryRequiresStaticOAuthCreds(entry v1.MCPServerCatalogEntry) bool {
-	if entry.Spec.Manifest.RemoteConfig == nil || !entry.Spec.Manifest.RemoteConfig.StaticOAuthRequired {
-		return false
-	}
-	return !entry.Status.OAuthCredentialConfigured
 }
 
 func secretBoundFieldLabel(prefix, kind string, h types.MCPHeader) string {

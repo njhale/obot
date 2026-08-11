@@ -134,12 +134,6 @@ func TestValidateComponentRejectsMalformedReferences(t *testing.T) {
 }
 
 func TestValidateComponentRejectsIneligibleCatalogEntries(t *testing.T) {
-	staticOAuthManifest := types.MCPServerCatalogEntryManifest{
-		Name:           "remote",
-		Runtime:        types.RuntimeRemote,
-		RemoteConfig:   &types.RemoteCatalogConfig{FixedURL: "https://example.com/mcp", StaticOAuthRequired: true},
-		ServerUserType: types.ServerUserTypeSingleUser,
-	}
 	multiUserManifest := npxEntryManifest("shared")
 	multiUserManifest.ServerUserType = types.ServerUserTypeMultiUser
 	nestedManifest := types.MCPServerCatalogEntryManifest{
@@ -172,12 +166,6 @@ func TestValidateComponentRejectsIneligibleCatalogEntries(t *testing.T) {
 			entry:       componentEntry("shared", "default", multiUserManifest),
 			catalogName: "default",
 			expected:    "use the multi-user MCP server instead",
-		},
-		{
-			name:        "remote entry requiring static oauth",
-			entry:       componentEntry("remote", "default", staticOAuthManifest),
-			catalogName: "default",
-			expected:    "with static OAuth cannot be included in a composite server",
 		},
 	}
 
@@ -261,4 +249,94 @@ func TestValidateComponentRefsResolvesEveryComponentBeforeAccepting(t *testing.T
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "itself composite")
+}
+
+func staticOAuthEntry(name string, configured bool) *v1.MCPServerCatalogEntry {
+	entry := componentEntry(name, "default", types.MCPServerCatalogEntryManifest{
+		Name:           name,
+		Runtime:        types.RuntimeRemote,
+		RemoteConfig:   &types.RemoteCatalogConfig{FixedURL: "https://example.com/mcp", StaticOAuthRequired: true},
+		ServerUserType: types.ServerUserTypeSingleUser,
+	})
+	entry.Status.OAuthCredentialConfigured = configured
+	return entry
+}
+
+func compositeEntry(name string, componentIDs ...string) v1.MCPServerCatalogEntry {
+	components := make([]types.CatalogComponentServer, 0, len(componentIDs))
+	for _, id := range componentIDs {
+		components = append(components, types.CatalogComponentServer{CatalogEntryID: id})
+	}
+
+	return *componentEntry(name, "default", types.MCPServerCatalogEntryManifest{
+		Name:            name,
+		Runtime:         types.RuntimeComposite,
+		ServerUserType:  types.ServerUserTypeSingleUser,
+		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: components},
+	})
+}
+
+func TestValidateComponentAcceptsStaticOAuthCatalogEntry(t *testing.T) {
+	// The credential is keyed on the component's own catalog entry, which is exactly what the
+	// composite references, so a component needing static OAuth is an ordinary component.
+	component := ResolvedComponent{
+		Ref:   types.CatalogComponentServer{CatalogEntryID: "remote"},
+		Entry: staticOAuthEntry("remote", false),
+	}
+
+	require.NoError(t, ValidateComponent(component, "default", ""))
+}
+
+func TestEntryRequiresStaticOAuthCredsFollowsComponents(t *testing.T) {
+	tests := []struct {
+		name     string
+		objects  []kclient.Object
+		entry    v1.MCPServerCatalogEntry
+		expected bool
+	}{
+		{
+			name:     "component is waiting on credentials",
+			objects:  []kclient.Object{staticOAuthEntry("remote", false), componentEntry("gmail", "default", npxEntryManifest("gmail"))},
+			entry:    compositeEntry("composite", "gmail", "remote"),
+			expected: true,
+		},
+		{
+			name:     "component credentials are configured",
+			objects:  []kclient.Object{staticOAuthEntry("remote", true)},
+			entry:    compositeEntry("composite", "remote"),
+			expected: false,
+		},
+		{
+			name:     "no component needs credentials",
+			objects:  []kclient.Object{componentEntry("gmail", "default", npxEntryManifest("gmail"))},
+			entry:    compositeEntry("composite", "gmail"),
+			expected: false,
+		},
+		{
+			// A component that never materializes cannot be waiting on anything, so it must not
+			// hide the composite from everyone forever.
+			name:     "unresolved component",
+			entry:    compositeEntry("composite", "deleted"),
+			expected: false,
+		},
+		{
+			name:     "multi-user component",
+			objects:  []kclient.Object{multiUserServer("shared", "default")},
+			entry:    compositeEntry("composite"),
+			expected: false,
+		},
+		{
+			name:     "non-composite entry still answers for itself",
+			entry:    *staticOAuthEntry("remote", false),
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := EntryRequiresStaticOAuthCreds(t.Context(), testClient(tt.objects...), tt.entry)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
 }

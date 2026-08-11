@@ -129,6 +129,15 @@
 							</div>
 							<p class="text-sm">{componentName}</p>
 							<McpDeprecatedNotice {deprecated} child />
+							{#if resolved?.missingOAuthCredentials}
+								<span
+									class="text-warning flex items-center gap-1 text-xs"
+									title="An administrator must configure OAuth credentials on this component before the composite can be used"
+								>
+									<CircleAlert class="size-4" />
+									<span>OAuth not configured</span>
+								</span>
+							{/if}
 							{#if componentServerId}
 								<span class="text-muted-content text-sm">({componentServerId})</span>
 							{/if}

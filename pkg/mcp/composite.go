@@ -135,11 +135,43 @@ func ValidateComponent(component ResolvedComponent, catalogName, workspaceID str
 	if entry.Spec.Manifest.ServerUserType == types.ServerUserTypeMultiUser {
 		return fmt.Errorf("multi-user catalog entry %q cannot be included in a composite server; use the multi-user MCP server instead", component.Ref.CatalogEntryID)
 	}
-	if entry.Spec.Manifest.Runtime == types.RuntimeRemote &&
-		entry.Spec.Manifest.RemoteConfig != nil &&
-		entry.Spec.Manifest.RemoteConfig.StaticOAuthRequired {
-		return fmt.Errorf("remote catalog entry %q with static OAuth cannot be included in a composite server", component.Ref.CatalogEntryID)
+	return nil
+}
+
+// EntryRequiresStaticOAuthCreds reports whether an entry cannot be used yet because an
+// administrator has not configured the static OAuth credentials it needs. A composite declares
+// none of its own: it is blocked while any component it exposes is, because the credential is
+// keyed on the component's catalog entry, which is exactly what the composite references.
+func EntryRequiresStaticOAuthCreds(ctx context.Context, c kclient.Client, entry v1.MCPServerCatalogEntry) (bool, error) {
+	if entry.Spec.Manifest.Runtime == types.RuntimeComposite {
+		if entry.Spec.Manifest.CompositeConfig == nil {
+			return false, nil
+		}
+
+		resolved, err := ResolveComponents(ctx, c, entry.Namespace, entry.Spec.Manifest.CompositeConfig.ComponentServers)
+		if err != nil {
+			return false, err
+		}
+
+		for _, component := range resolved {
+			// A multi-user component proxies to a server an administrator already runs, and an
+			// unresolved one never materializes, so neither can be waiting on credentials here.
+			if component.Entry != nil && componentEntryRequiresStaticOAuthCreds(*component.Entry) {
+				return true, nil
+			}
+		}
+		return false, nil
 	}
 
-	return nil
+	return componentEntryRequiresStaticOAuthCreds(entry), nil
+}
+
+// componentEntryRequiresStaticOAuthCreds answers EntryRequiresStaticOAuthCreds for an entry that
+// declares its own remote configuration, using the status the controller keeps up to date rather
+// than looking the credential up per call.
+func componentEntryRequiresStaticOAuthCreds(entry v1.MCPServerCatalogEntry) bool {
+	if entry.Spec.Manifest.RemoteConfig == nil || !entry.Spec.Manifest.RemoteConfig.StaticOAuthRequired {
+		return false
+	}
+	return !entry.Status.OAuthCredentialConfigured
 }

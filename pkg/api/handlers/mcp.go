@@ -195,9 +195,13 @@ func (m *MCPHandler) ListEntriesFromAllSources(req api.Context) error {
 		if hasAccess {
 			// Hide entries that require OAuth credentials that haven't been configured (non-admins only).
 			// Workspace owners can always see their own entries (they need to configure the OAuth credentials).
-			if !req.UserIsAdmin() && entryRequiresStaticOAuthCreds(entry) {
+			if !req.UserIsAdmin() {
+				requiresCreds, err := mcp.EntryRequiresStaticOAuthCreds(req.Context(), req.Storage, entry)
+				if err != nil {
+					return err
+				}
 				// Check if this is a workspace entry owned by the current user
-				if entry.Spec.PowerUserWorkspaceID != system.GetPowerUserWorkspaceID(req.User.GetUID()) {
+				if requiresCreds && entry.Spec.PowerUserWorkspaceID != system.GetPowerUserWorkspaceID(req.User.GetUID()) {
 					// Either the entry is not in a workspace, or it's in a workspace not owned by the user. Omit it.
 					continue
 				}
@@ -241,14 +245,24 @@ func compositeComponentsForEntry(req api.Context, entry v1.MCPServerCatalogEntry
 		// tool list may have renamed or removed a tool an override names.
 		observed, recorded := entry.Status.ObservedComponents[component.Ref.ComponentID()]
 
+		// A composite is blocked while any component is waiting on static OAuth credentials, so
+		// report it per component: the credential is configured on the component's own entry.
+		var missingOAuth bool
+		if component.Entry != nil {
+			missingOAuth = manifest.RemoteConfig != nil &&
+				manifest.RemoteConfig.StaticOAuthRequired &&
+				!component.Entry.Status.OAuthCredentialConfigured
+		}
+
 		components = append(components, types.CompositeComponent{
-			CatalogEntryID:     component.Ref.CatalogEntryID,
-			MCPServerID:        component.Ref.MCPServerID,
-			ToolPrefix:         component.Ref.ToolPrefix,
-			ToolOverrides:      component.Ref.ToolOverrides,
-			Manifest:           manifest,
-			Unresolved:         component.Unresolved(),
-			ToolOverridesStale: recorded && observed.SourceToolsHash != utils.Digest(manifest.ToolPreview),
+			CatalogEntryID:          component.Ref.CatalogEntryID,
+			MCPServerID:             component.Ref.MCPServerID,
+			ToolPrefix:              component.Ref.ToolPrefix,
+			ToolOverrides:           component.Ref.ToolOverrides,
+			Manifest:                manifest,
+			Unresolved:              component.Unresolved(),
+			ToolOverridesStale:      recorded && observed.SourceToolsHash != utils.Digest(manifest.ToolPreview),
+			MissingOAuthCredentials: missingOAuth,
 		})
 	}
 
@@ -1198,9 +1212,12 @@ func (m missingCatalogEntryAdminConfig) err(entryID string) error {
 }
 
 func entryMissingAdminConfig(ctx context.Context, storage, client kclient.Client, obotNamespace string, entry v1.MCPServerCatalogEntry, secretBindingAllowedLabel string) (missingCatalogEntryAdminConfig, error) {
-	missing := missingCatalogEntryAdminConfig{
-		StaticOAuth: entryRequiresStaticOAuthCreds(entry),
+	staticOAuth, err := mcp.EntryRequiresStaticOAuthCreds(ctx, storage, entry)
+	if err != nil {
+		return missingCatalogEntryAdminConfig{}, err
 	}
+
+	missing := missingCatalogEntryAdminConfig{StaticOAuth: staticOAuth}
 
 	type manifestRef struct {
 		prefix   string
@@ -1682,7 +1699,11 @@ func (m *MCPHandler) CreateServer(req api.Context) error {
 		}
 
 		// Block server creation if OAuth is required but not configured
-		if entryRequiresStaticOAuthCreds(catalogEntry) {
+		requiresCreds, err := mcp.EntryRequiresStaticOAuthCreds(req.Context(), req.Storage, catalogEntry)
+		if err != nil {
+			return err
+		}
+		if requiresCreds {
 			return types.NewErrBadRequest("catalog entry requires OAuth configuration by an administrator before it can be used")
 		}
 
@@ -4188,10 +4209,10 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, compositeServer v1.
 	// This will let us abort an update if the server's manifest has changed before the update was applied.
 	oldManifestHash := utils.Digest(compositeServer.Spec.Manifest)
 
-	// Build fresh manifest with user URLs applied
+	// Rebuild the composition from the entry, carrying over which components are switched off.
 	updatedManifest, err := serverManifestFromCatalogEntryManifest(
 		req.UserIsAdmin(),
-		true,
+		false,
 		entry.Spec.Manifest,
 		compositeServer.Spec.Manifest,
 	)

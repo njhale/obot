@@ -248,8 +248,14 @@ func (h *MCPCatalogHandler) ListEntries(req api.Context) error {
 
 		if hasAccess {
 			// Hide catalog entries that require OAuth credentials that haven't been configured (non-admins only).
-			if !req.UserIsAdmin() && entryRequiresStaticOAuthCreds(entry) {
-				continue
+			if !req.UserIsAdmin() {
+				requiresCreds, err := mcp.EntryRequiresStaticOAuthCreds(req.Context(), req.Storage, entry)
+				if err != nil {
+					return err
+				}
+				if requiresCreds {
+					continue
+				}
 			}
 			components, err := compositeComponentsForEntry(req, entry)
 			if err != nil {
@@ -1818,18 +1824,6 @@ func pruneUnresolvedComponents(req api.Context, manifest *types.MCPServerCatalog
 	manifest.CompositeConfig.ComponentServers = componentServers
 
 	return nil
-}
-
-// entryRequiresStaticOAuthCreds checks if a catalog entry requires OAuth credentials
-// that haven't been configured yet. Returns true if the entry should be hidden from non-admin users.
-func entryRequiresStaticOAuthCreds(entry v1.MCPServerCatalogEntry) bool {
-	// Check if the entry requires static OAuth
-	if entry.Spec.Manifest.RemoteConfig == nil || !entry.Spec.Manifest.RemoteConfig.StaticOAuthRequired {
-		return false
-	}
-
-	// Use the cached status field instead of doing a credential lookup
-	return !entry.Status.OAuthCredentialConfigured
 }
 
 // verifyOAuthCredentialAccess verifies that:
