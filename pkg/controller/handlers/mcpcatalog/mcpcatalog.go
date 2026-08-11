@@ -419,10 +419,6 @@ func (h *Handler) resolveCompositeSourceRefs(ctx context.Context, c client.Clien
 			if target == nil {
 				target = entriesByName[component.CatalogEntryID]
 			}
-			// Targets found in this sync batch are being written into the catalog by this same
-			// pass, so their catalog membership is implied rather than already stored. Only a
-			// target read back from storage can be scope-checked.
-			scope := ""
 			if target == nil && c != nil {
 				var storedEntry v1.MCPServerCatalogEntry
 				if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: component.CatalogEntryID}, &storedEntry); err != nil && !apierrors.IsNotFound(err) {
@@ -430,14 +426,16 @@ func (h *Handler) resolveCompositeSourceRefs(ctx context.Context, c client.Clien
 					continue
 				} else if err == nil {
 					target = &storedEntry
-					scope = catalogName
 				}
 			}
 			if target == nil {
+				// Skip the whole entry rather than applying it with a reference that no longer
+				// resolves, which would overwrite the component this composite currently uses.
+				errs = append(errs, fmt.Errorf("unresolved catalogEntryID %q", component.CatalogEntryID))
 				continue
 			}
 
-			if err := mcp.ValidateComponent(mcp.ResolvedComponent{Ref: *component, Entry: target}, scope, ""); err != nil {
+			if err := mcp.ValidateComponent(mcp.ResolvedComponent{Ref: *component, Entry: target}, catalogName, ""); err != nil {
 				errs = append(errs, err)
 				continue
 			}

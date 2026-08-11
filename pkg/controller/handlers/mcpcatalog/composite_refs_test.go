@@ -139,7 +139,9 @@ compositeConfig:
 	}
 }
 
-func TestResolveCompositeSourceRefsLeavesUnknownShorthandAsInternalID(t *testing.T) {
+func TestResolveCompositeSourceRefsSkipsCompositeWithUnresolvableShorthand(t *testing.T) {
+	// A shorthand ref that matches nothing used to pass through silently, so the composite was
+	// applied carrying a reference that resolves to nothing, overwriting the component it had.
 	composite := testCatalogEntry("composite", "source", "composite", types.MCPServerCatalogEntryManifest{
 		Name:             "Composite",
 		ShortDescription: "Composite",
@@ -154,9 +156,8 @@ func TestResolveCompositeSourceRefsLeavesUnknownShorthandAsInternalID(t *testing
 
 	result, errsBySourceURL := (&Handler{}).resolveCompositeSourceRefs(t.Context(), nil, "", "", []client.Object{composite})
 
-	assert.Empty(t, errsBySourceURL)
-	assert.Len(t, result, 1)
-	assert.Equal(t, "internal-id", composite.Spec.Manifest.CompositeConfig.ComponentServers[0].CatalogEntryID)
+	assert.Empty(t, result)
+	assert.Contains(t, errsBySourceURL["source"], `unresolved catalogEntryID "internal-id"`)
 }
 
 func TestResolveCompositeSourceRefsHydratesInternalIDComponents(t *testing.T) {
@@ -482,4 +483,30 @@ func TestResolveCompositeSourceRefsRejectsMultiUserComponentEntry(t *testing.T) 
 
 	assert.Len(t, result, 1)
 	assert.Contains(t, errsBySourceURL["source"], "use the multi-user MCP server instead")
+}
+
+func TestResolveCompositeSourceRefsScopeChecksInBatchComponents(t *testing.T) {
+	// In-batch entries carry the catalog they are being synced into, so they are scope-checked
+	// the same way an entry read back from storage is.
+	target := testCatalogEntry("target", "source", "tool", types.MCPServerCatalogEntryManifest{
+		Name:           "Tool",
+		Runtime:        types.RuntimeNPX,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "tool"},
+		ServerUserType: types.ServerUserTypeSingleUser,
+	})
+	target.Spec.MCPCatalogName = "other-catalog"
+	composite := testCatalogEntry("composite", "source", "composite", types.MCPServerCatalogEntryManifest{
+		Name:           "Composite",
+		Runtime:        types.RuntimeComposite,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+			{CatalogEntryID: sourceRef("source", "tool")},
+		}},
+	})
+
+	result, errsBySourceURL := (&Handler{}).resolveCompositeSourceRefs(t.Context(), nil, "default", "default", []client.Object{target, composite})
+
+	assert.Len(t, result, 1)
+	assert.Equal(t, "target", result[0].GetName())
+	assert.Contains(t, errsBySourceURL["source"], `not found in catalog "default"`)
 }
