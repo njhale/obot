@@ -151,6 +151,17 @@ type ValidationOptions struct {
 	ResourceMaximums             ResourceMaximums
 }
 
+// ValidateSecretBindingsAvailable verifies a manifest's secret-bound configuration resolves from
+// the Kubernetes Secrets this session manager is allowed to read. It lets a caller that holds a
+// session manager but no Kubernetes client of its own — a controller, for one — apply the same
+// check the API applies on create, update and launch.
+func (sm *SessionManager) ValidateSecretBindingsAvailable(ctx context.Context, manifest types.MCPServerManifest) error {
+	if sm == nil {
+		return nil
+	}
+	return ValidateSecretBindingsAvailable(ctx, sm.localK8sClient, sm.obotNamespace, manifest.Env, manifest.RemoteConfig, sm.secretBindingAllowedLabel)
+}
+
 // ValidationOptions returns manifest validation options configured from this session manager's
 // startup configuration and the resource maximums currently persisted in settings.
 func (sm *SessionManager) ValidationOptions(ctx context.Context, storageClient kclient.Client) (ValidationOptions, error) {

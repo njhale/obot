@@ -108,9 +108,8 @@ func (h *Handler) DetectDrift(req router.Request, _ router.Response) error {
 	return nil
 }
 
-// validateComponentManifest applies the manifest rules an MCP server created directly from a
-// catalog entry is held to. Secret binding availability is not checked here, since the controller
-// has no local Kubernetes client.
+// validateComponentManifest applies the rules an MCP server created directly from a catalog entry
+// is held to.
 func (h *Handler) validateComponentManifest(req router.Request, manifest types.MCPServerManifest, entry v1.MCPServerCatalogEntry) error {
 	options, err := h.mcpSessionManager.ValidationOptions(req.Ctx, req.Client)
 	if err != nil {
@@ -135,6 +134,11 @@ func (h *Handler) validateComponentManifest(req router.Request, manifest types.M
 		return err
 	}
 	if err := mcp.ValidateSecretBindings(manifest, entry.IsGitManaged(), false, h.mcpRuntimeBackend); err != nil {
+		return err
+	}
+	// A component binding a Kubernetes Secret that cannot be resolved would come up unable to
+	// start, with nothing its user could do about it.
+	if err := h.mcpSessionManager.ValidateSecretBindingsAvailable(req.Ctx, manifest); err != nil {
 		return err
 	}
 

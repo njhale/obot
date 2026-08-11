@@ -206,3 +206,47 @@ func TestEntryMissingAdminConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestSessionManagerValidateSecretBindingsAvailable(t *testing.T) {
+	const ns = "obot-ns"
+
+	bound := types.MCPServerManifest{
+		Runtime: types.RuntimeNPX,
+		Env: []types.MCPEnv{{MCPHeader: types.MCPHeader{
+			Key:           "TOKEN",
+			SecretBinding: &types.MCPSecretBinding{Name: "s", Key: "k"},
+		}}},
+	}
+	unbound := types.MCPServerManifest{Runtime: types.RuntimeNPX}
+
+	secretClient := func(objects ...kclient.Object) kclient.Client {
+		scheme := runtime.NewScheme()
+		require.NoError(t, corev1.AddToScheme(scheme))
+		return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: ns, Labels: map[string]string{"label": ""}},
+		Data:       map[string][]byte{"k": []byte("v")},
+	}
+
+	t.Run("nil session manager cannot check and does not block", func(t *testing.T) {
+		var sm *SessionManager
+		require.NoError(t, sm.ValidateSecretBindingsAvailable(t.Context(), bound))
+	})
+
+	t.Run("binding resolves", func(t *testing.T) {
+		sm := &SessionManager{localK8sClient: secretClient(secret), obotNamespace: ns, secretBindingAllowedLabel: "label"}
+		require.NoError(t, sm.ValidateSecretBindingsAvailable(t.Context(), bound))
+	})
+
+	t.Run("binding does not resolve", func(t *testing.T) {
+		sm := &SessionManager{localK8sClient: secretClient(), obotNamespace: ns, secretBindingAllowedLabel: "label"}
+		err := sm.ValidateSecretBindingsAvailable(t.Context(), bound)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unavailable Kubernetes Secrets")
+	})
+
+	t.Run("nothing bound needs no client", func(t *testing.T) {
+		require.NoError(t, (&SessionManager{}).ValidateSecretBindingsAvailable(t.Context(), unbound))
+	})
+}
