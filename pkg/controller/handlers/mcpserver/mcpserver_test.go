@@ -1507,6 +1507,60 @@ func TestEnsureCompositeComponentsSkipsComponentWithMissingMultiUserServer(t *te
 	require.Len(t, children, 1, "the healthy component must still materialize")
 }
 
+func TestEnsureCompositeComponentsDropsServerWhoseCatalogEntryWasDeleted(t *testing.T) {
+	entry := newMCPServerCatalogEntry("present-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Present",
+		Runtime:        types.RuntimeNPX,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "@example/present"},
+	})
+	composite := newCompositeServer("composite",
+		types.ComponentServer{CatalogEntryID: "deleted-entry"},
+		types.ComponentServer{CatalogEntryID: entry.Name},
+	)
+
+	// A component server left behind by a catalog entry that has since been deleted.
+	orphan := newMCPServer("orphaned-component")
+	orphan.Spec.CompositeName = composite.Name
+	orphan.Spec.MCPServerCatalogEntryName = "deleted-entry"
+	orphan.Spec.UserID = composite.Spec.UserID
+	orphan.Spec.Manifest = types.MCPServerManifest{
+		Name:      "Deleted",
+		Runtime:   types.RuntimeNPX,
+		NPXConfig: &types.NPXRuntimeConfig{Package: "@example/deleted"},
+	}
+
+	c := newFakeClient(t, entry, composite, orphan)
+
+	require.NoError(t, ensureCompositeComponents(t, c, composite))
+
+	children := componentServersOf(t, c, composite)
+	require.Len(t, children, 1, "a component whose source is gone must be dropped entirely")
+	assert.Equal(t, entry.Name, children[0].Spec.MCPServerCatalogEntryName)
+}
+
+func TestEnsureCompositeComponentsDropsInstanceWhoseMultiUserServerWasDeleted(t *testing.T) {
+	composite := newCompositeServer("composite", types.ComponentServer{MCPServerID: "deleted-server"})
+
+	orphan := &v1.MCPServerInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "orphaned-instance", Namespace: composite.Namespace},
+		Spec: v1.MCPServerInstanceSpec{
+			MCPServerName: "deleted-server",
+			UserID:        composite.Spec.UserID,
+			CompositeName: composite.Name,
+		},
+	}
+
+	c := newFakeClient(t, composite, orphan)
+
+	require.NoError(t, ensureCompositeComponents(t, c, composite))
+
+	var instances v1.MCPServerInstanceList
+	require.NoError(t, c.List(t.Context(), &instances, kclient.InNamespace(composite.Namespace),
+		kclient.MatchingFields{"spec.compositeName": composite.Name}))
+	assert.Empty(t, instances.Items, "an instance whose multi-user server is gone must be dropped")
+}
+
 func newMCPServer(name string) *v1.MCPServer {
 	return &v1.MCPServer{
 		TypeMeta: metav1.TypeMeta{

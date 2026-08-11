@@ -959,7 +959,6 @@ func (h *Handler) EnsureCompositeComponents(req router.Request, _ router.Respons
 					// The referenced server is gone. Skip this component rather than failing the
 					// whole composite, so the remaining components keep reconciling.
 					log.Infof("Skipping composite component with missing multi-user server: composite=%s componentServer=%s", compositeServer.Name, component.MCPServerID)
-					delete(existingInstances, component.MCPServerID)
 					continue
 				} else if err != nil {
 					return fmt.Errorf("failed to get multi-user server %s: %w", component.MCPServerID, err)
@@ -987,10 +986,9 @@ func (h *Handler) EnsureCompositeComponents(req router.Request, _ router.Respons
 				existingInstance := existingInstances[component.MCPServerID]
 				var multiUserServer v1.MCPServer
 				if err := req.Get(&multiUserServer, compositeServer.Namespace, component.MCPServerID); apierrors.IsNotFound(err) {
-					// Keep the existing instance and its user configuration rather than pruning it
-					// on a reference that may be transiently unresolvable.
-					log.Infof("Skipping composite component with missing multi-user server: composite=%s componentServer=%s", compositeServer.Name, component.MCPServerID)
-					delete(existingInstances, component.MCPServerID)
+					// The referenced server is gone entirely, so the instance goes with it. Leaving
+					// it out of the bookkeeping below hands it to the stale-instance sweep.
+					log.Infof("Dropping composite component whose multi-user server no longer exists: composite=%s componentServer=%s", compositeServer.Name, component.MCPServerID)
 					continue
 				} else if err != nil {
 					return fmt.Errorf("failed to get multi-user server %s: %w", component.MCPServerID, err)
@@ -1009,18 +1007,21 @@ func (h *Handler) EnsureCompositeComponents(req router.Request, _ router.Respons
 			continue
 		}
 
-		// Catalog entry component
+		// Catalog entry component. The source is resolved before anything else: a component whose
+		// catalog entry is gone is gone in its entirety, so leaving it out of the bookkeeping
+		// below hands any server it had to the stale-server sweep.
+		var componentEntry v1.MCPServerCatalogEntry
+		if err := req.Get(&componentEntry, compositeServer.Namespace, component.CatalogEntryID); apierrors.IsNotFound(err) {
+			log.Infof("Dropping composite component whose catalog entry no longer exists: composite=%s catalogEntry=%s", compositeServer.Name, component.CatalogEntryID)
+			continue
+		} else if err != nil {
+			return fmt.Errorf("failed to get component catalog entry %s: %w", component.CatalogEntryID, err)
+		}
+
 		if existingServer, exists := existingServers[component.CatalogEntryID]; !exists {
 			// Derive a new component server from its source catalog entry rather than from the
 			// composite's snapshot, so a component always materializes with current configuration.
-			var componentEntry v1.MCPServerCatalogEntry
-			if err := req.Get(&componentEntry, compositeServer.Namespace, component.CatalogEntryID); apierrors.IsNotFound(err) {
-				log.Infof("Skipping composite component with missing catalog entry: composite=%s catalogEntry=%s", compositeServer.Name, component.CatalogEntryID)
-				continue
-			} else if err != nil {
-				return fmt.Errorf("failed to get component catalog entry %s: %w", component.CatalogEntryID, err)
-			}
-
+			//
 			// A user-supplied URL can only come from the composite at this point, because the
 			// component server that would otherwise hold it does not exist yet.
 			var userURL string
