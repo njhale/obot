@@ -447,15 +447,27 @@ func TestTriggerUpdateScope(t *testing.T) {
 				wantErrContains: "MCP server server not found",
 			},
 			{
-				name: "component server is rejected",
+				// A component of a composite upgrades on its own, against its own catalog entry.
+				name: "component server can be upgraded individually",
 				user: testUserWithRole("admin", types.GroupAdmin),
 				server: func() v1.MCPServer {
 					server := baseServer("owner")
 					server.Spec.CompositeName = "composite"
 					return server
 				}(),
-				entry:           baseEntry(""),
-				wantErrContains: "cannot trigger update on a component server",
+				entry:        baseEntry(""),
+				wantShutdown: true,
+			},
+			{
+				name: "component server owner can upgrade it individually",
+				user: testUser("owner"),
+				server: func() v1.MCPServer {
+					server := baseServer("owner")
+					server.Spec.CompositeName = "composite"
+					return server
+				}(),
+				entry:        baseEntry(""),
+				wantShutdown: true,
 			},
 			{
 				name: "server without catalog entry is a no-op",

@@ -4060,11 +4060,6 @@ func (m *MCPHandler) TriggerUpdate(req api.Context) error {
 		}
 	}
 
-	// Reject component servers - must upgrade parent composite
-	if server.Spec.CompositeName != "" {
-		return types.NewErrBadRequest("cannot trigger update on a component server; upgrade the parent composite server instead")
-	}
-
 	if server.Spec.MCPServerCatalogEntryName == "" || !server.Status.NeedsUpdate {
 		return nil
 	}
@@ -4089,6 +4084,13 @@ func (m *MCPHandler) TriggerUpdate(req api.Context) error {
 		return m.triggerCompositeUpdate(req, server, entry)
 	}
 
+	return m.applyCatalogEntryUpdate(req, server, entry)
+}
+
+// applyCatalogEntryUpdate brings a server's manifest up to date with its catalog entry,
+// shutting the server down first. It is used both for standalone servers and for the
+// component servers of a composite, which upgrade the same way.
+func (m *MCPHandler) applyCatalogEntryUpdate(req api.Context, server v1.MCPServer, entry v1.MCPServerCatalogEntry) error {
 	candidate := server.DeepCopy()
 	updateServerFromCatalogEntry(candidate, entry)
 	if err := validateServerManifestWithResourceMaximums(req, candidate.Spec.Manifest, !candidate.Spec.IsSingleUser(), m.mcpSessionManager); err != nil {
@@ -4227,15 +4229,54 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, compositeServer v1.
 		return types.NewErrBadRequest("validation failed: %v", err)
 	}
 
-	// Ensure the composite server's manifest is updated
+	// Apply the composition first: which components belong to the composite, under what tool
+	// names. Component configuration is not touched here; each component owns its own.
 	compositeServer, err = m.updateCompositeManifest(req, compositeServer.Name, oldManifestHash, updatedManifest)
 	if err != nil {
 		return err
 	}
 
-	// Wait for the composite server to apply the changes to all component servers
-	if _, err := waitForCompositeReady(req, compositeServer, 30*time.Second); err != nil {
+	// Wait for components added or removed by the composition change to materialize, so the
+	// per-component upgrade below sees the full set.
+	if compositeServer, err = waitForCompositeReady(req, compositeServer, 30*time.Second); err != nil {
 		return fmt.Errorf("failed to wait for component servers to sync: %w", err)
+	}
+
+	if err := m.upgradeCompositeComponents(req, compositeServer); err != nil {
+		return err
+	}
+
+	// The composite holds clients to its component servers, which have just been restarted.
+	return m.removeMCPServer(req.Context(), compositeServer)
+}
+
+// upgradeCompositeComponents brings every drifted component server of a composite up to date
+// with its own catalog entry. Components that have not drifted are left running.
+func (m *MCPHandler) upgradeCompositeComponents(req api.Context, compositeServer v1.MCPServer) error {
+	var componentServers v1.MCPServerList
+	if err := req.List(&componentServers, &kclient.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("spec.compositeName", compositeServer.Name),
+		Namespace:     compositeServer.Namespace,
+	}); err != nil {
+		return fmt.Errorf("failed to list component servers: %w", err)
+	}
+
+	for _, component := range componentServers.Items {
+		if !component.Status.NeedsUpdate || component.Spec.MCPServerCatalogEntryName == "" {
+			continue
+		}
+
+		var componentEntry v1.MCPServerCatalogEntry
+		if err := req.Get(&componentEntry, component.Spec.MCPServerCatalogEntryName); apierrors.IsNotFound(err) {
+			// The source is gone; leave the component running rather than failing the upgrade.
+			continue
+		} else if err != nil {
+			return err
+		}
+
+		if err := m.applyCatalogEntryUpdate(req, component, componentEntry); err != nil {
+			return fmt.Errorf("failed to update component server %s: %w", component.Name, err)
+		}
 	}
 
 	return nil

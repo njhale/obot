@@ -76,7 +76,7 @@ func New(gatewayClient *gateway.Client, mcpSessionManager *mcp.SessionManager, t
 func (h *Handler) DetectDrift(req router.Request, _ router.Response) error {
 	server := req.Object.(*v1.MCPServer)
 
-	if server.Spec.MCPServerCatalogEntryName == "" || server.Spec.CompositeName != "" {
+	if server.Spec.MCPServerCatalogEntryName == "" {
 		return nil
 	}
 
@@ -92,12 +92,40 @@ func (h *Handler) DetectDrift(req router.Request, _ router.Response) error {
 		return err
 	}
 
+	// A composite drifts when its own composition drifts, or when any of its components has.
+	// Component configuration lives on the component server, so it is detected there.
+	if !drifted && server.Spec.Manifest.Runtime == types.RuntimeComposite {
+		if drifted, err = h.componentNeedsUpdate(req, server); err != nil {
+			return err
+		}
+	}
+
 	if server.Status.NeedsUpdate != drifted {
 		log.Infof("MCP server catalog drift status changed: server=%s catalogEntry=%s needsUpdate=%v", server.Name, server.Spec.MCPServerCatalogEntryName, drifted)
 		server.Status.NeedsUpdate = drifted
 		return req.Client.Status().Update(req.Ctx, server)
 	}
 	return nil
+}
+
+// componentNeedsUpdate reports whether any component server of a composite has drifted from its
+// own catalog entry.
+func (*Handler) componentNeedsUpdate(req router.Request, compositeServer *v1.MCPServer) (bool, error) {
+	var componentServers v1.MCPServerList
+	if err := req.List(&componentServers, &kclient.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("spec.compositeName", compositeServer.Name),
+		Namespace:     compositeServer.Namespace,
+	}); err != nil {
+		return false, fmt.Errorf("failed to list component servers: %w", err)
+	}
+
+	for _, component := range componentServers.Items {
+		if component.Status.NeedsUpdate {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (h *Handler) EnsureMCPNetworkPolicy(req router.Request, _ router.Response) error {
@@ -340,11 +368,7 @@ func configurationHasDrifted(serverManifest types.MCPServerManifest, entryManife
 	case types.RuntimeRemote:
 		drifted = remoteConfigHasDrifted(serverManifest.RemoteConfig, entryManifest.RemoteConfig)
 	case types.RuntimeComposite:
-		var err error
-		drifted, err = compositeConfigHasDrifted(serverManifest.CompositeConfig, entryManifest.CompositeConfig, defaultDenyAllEgress)
-		if err != nil {
-			return false, err
-		}
+		drifted = compositeConfigHasDrifted(serverManifest.CompositeConfig, entryManifest.CompositeConfig)
 	default:
 		return false, fmt.Errorf("unknown runtime type: %s", serverManifest.Runtime)
 	}
@@ -571,18 +595,21 @@ func adminAddedSecretBinding(binding *types.MCPSecretBinding) bool {
 	return binding != nil && binding.AdminAdded
 }
 
-// compositeConfigHasDrifted checks if the composite configuration has drifted
-func compositeConfigHasDrifted(serverConfig *types.CompositeRuntimeConfig, entryConfig *types.CompositeCatalogConfig, defaultDenyAllEgress bool) (bool, error) {
+// compositeConfigHasDrifted checks whether a composite's composition has drifted from its catalog
+// entry: which components belong to it, and the tool names they are exposed under. Each
+// component's own configuration is compared against its own catalog entry on the component
+// server, so it is deliberately not considered here.
+func compositeConfigHasDrifted(serverConfig *types.CompositeRuntimeConfig, entryConfig *types.CompositeCatalogConfig) bool {
 	if serverConfig == nil && entryConfig == nil {
-		return false, nil
+		return false
 	}
 	if serverConfig == nil || entryConfig == nil {
-		return true, nil
+		return true
 	}
 
 	// Fast length check
 	if len(serverConfig.ComponentServers) != len(entryConfig.ComponentServers) {
-		return true, nil
+		return true
 	}
 
 	entryComponents := make(map[string]types.CatalogComponentServer, len(entryConfig.ComponentServers))
@@ -595,27 +622,19 @@ func compositeConfigHasDrifted(serverConfig *types.CompositeRuntimeConfig, entry
 	for _, serverComponent := range serverConfig.ComponentServers {
 		entryComponent, ok := entryComponents[serverComponent.ComponentID()]
 		if !ok {
-			return true, nil
+			return true
 		}
 
-		// Compare tool prefix
 		if serverComponent.ToolPrefix != entryComponent.ToolPrefix {
-			return true, nil
+			return true
 		}
 
-		// Compare tool overrides
 		if utils.Digest(serverComponent.ToolOverrides) != utils.Digest(entryComponent.ToolOverrides) {
-			return true, nil
-		}
-
-		// Compare manifests
-		drifted, err := configurationHasDrifted(serverComponent.Manifest, entryComponent.Manifest, defaultDenyAllEgress)
-		if err != nil || drifted {
-			return drifted, err
+			return true
 		}
 	}
 
-	return false, nil
+	return false
 }
 
 // EnsureMCPServerInstanceUserCount ensures that mcp server instance user count for multi-user MCP servers is up to date.

@@ -2082,3 +2082,90 @@ func TestEnsureMCPNetworkPolicyDeletesPolicyForUnsupportedRuntime(t *testing.T) 
 	}))
 	require.Empty(t, policies.Items)
 }
+
+func TestDetectDriftFlagsComponentServerAgainstItsOwnEntry(t *testing.T) {
+	// Component servers used to be skipped entirely, so a drifted component was invisible.
+	entry := newMCPServerCatalogEntry("gmail-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Gmail",
+		Runtime:        types.RuntimeNPX,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "@example/gmail@2.0.0"},
+	})
+	child := newMCPServer("component-server")
+	child.Spec.CompositeName = "composite"
+	child.Spec.MCPServerCatalogEntryName = entry.Name
+	child.Spec.Manifest = types.MCPServerManifest{
+		Name:      "Gmail",
+		Runtime:   types.RuntimeNPX,
+		NPXConfig: &types.NPXRuntimeConfig{Package: "@example/gmail@1.0.0"},
+	}
+
+	c := newFakeClient(t, entry, child)
+	require.NoError(t, (&Handler{}).DetectDrift(router.Request{
+		Client: c, Ctx: t.Context(), Object: child, Namespace: child.Namespace, Name: child.Name,
+	}, &router.ResponseWrapper{}))
+
+	var updated v1.MCPServer
+	require.NoError(t, c.Get(t.Context(), router.Key(child.Namespace, child.Name), &updated))
+	assert.True(t, updated.Status.NeedsUpdate)
+}
+
+func TestDetectDriftRollsComponentDriftUpToTheComposite(t *testing.T) {
+	compositeEntry := newMCPServerCatalogEntry("composite-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Composite",
+		Runtime:        types.RuntimeComposite,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		CompositeConfig: &types.CompositeCatalogConfig{
+			ComponentServers: []types.CatalogComponentServer{{CatalogEntryID: "gmail-entry"}},
+		},
+	})
+	composite := newCompositeServer("composite", types.ComponentServer{CatalogEntryID: "gmail-entry"})
+	composite.Spec.MCPServerCatalogEntryName = compositeEntry.Name
+
+	child := newMCPServer("component-server")
+	child.Spec.CompositeName = composite.Name
+	child.Spec.MCPServerCatalogEntryName = "gmail-entry"
+	child.Status.NeedsUpdate = true
+
+	c := newFakeClient(t, compositeEntry, composite, child)
+	require.NoError(t, (&Handler{}).DetectDrift(router.Request{
+		Client: c, Ctx: t.Context(), Object: composite, Namespace: composite.Namespace, Name: composite.Name,
+	}, &router.ResponseWrapper{}))
+
+	var updated v1.MCPServer
+	require.NoError(t, c.Get(t.Context(), router.Key(composite.Namespace, composite.Name), &updated))
+	assert.True(t, updated.Status.NeedsUpdate,
+		"a drifted component must surface on its composite")
+}
+
+func TestCompositeConfigHasDriftedComparesCompositionOnly(t *testing.T) {
+	// Component configuration is compared on the component server, not here, so a component
+	// whose source config differs must not by itself count as composition drift.
+	serverConfig := &types.CompositeRuntimeConfig{ComponentServers: []types.ComponentServer{{
+		CatalogEntryID: "gmail-entry",
+		ToolPrefix:     "gmail",
+		Manifest: types.MCPServerManifest{
+			Runtime:   types.RuntimeNPX,
+			NPXConfig: &types.NPXRuntimeConfig{Package: "@example/gmail@1.0.0"},
+		},
+	}}}
+	entryConfig := &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{{
+		CatalogEntryID: "gmail-entry",
+		ToolPrefix:     "gmail",
+		Manifest: types.MCPServerCatalogEntryManifest{
+			Runtime:   types.RuntimeNPX,
+			NPXConfig: &types.NPXRuntimeConfig{Package: "@example/gmail@2.0.0"},
+		},
+	}}}
+
+	assert.False(t, compositeConfigHasDrifted(serverConfig, entryConfig))
+
+	entryConfig.ComponentServers[0].ToolPrefix = "mail"
+	assert.True(t, compositeConfigHasDrifted(serverConfig, entryConfig),
+		"a tool prefix change is composition drift")
+
+	entryConfig.ComponentServers[0].ToolPrefix = "gmail"
+	entryConfig.ComponentServers[0].CatalogEntryID = "other-entry"
+	assert.True(t, compositeConfigHasDrifted(serverConfig, entryConfig),
+		"a membership change is composition drift")
+}
