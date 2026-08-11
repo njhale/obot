@@ -1706,7 +1706,11 @@ func (m *MCPHandler) CreateServer(req api.Context) error {
 		// For multi-user catalog entries, preserve the catalog entry's runtime shape.
 		// Admins may override single-user catalog entry config.
 		isAdminOverride := req.UserIsAdmin() && catalogEntry.Spec.Manifest.ServerUserType.IsSingleUser()
-		manifest, err := serverManifestFromCatalogEntryManifest(isAdminOverride, false, catalogEntry.Spec.Manifest, input.MCPServerManifest)
+		// A composite's components are configured once they materialize as their own servers, so a
+		// component URL the user has not supplied yet is expected. Each component comes up flagged
+		// as needing one instead.
+		deferComponentURLs := catalogEntry.Spec.Manifest.Runtime == types.RuntimeComposite
+		manifest, err := serverManifestFromCatalogEntryManifest(isAdminOverride, deferComponentURLs, catalogEntry.Spec.Manifest, input.MCPServerManifest)
 		if err != nil {
 			return err
 		}

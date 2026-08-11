@@ -628,9 +628,10 @@
 			const aliasToUse =
 				(configureForm as { name?: string } | undefined)?.name ||
 				getUniqueAlias(entry.manifest.name || '');
+			// Component URLs are delivered by the configure call below, which writes them to each
+			// component server. Creating the composite only establishes which components it has.
 			const componentServersForCreate: Array<{
 				catalogEntryID: string;
-				manifest: Record<string, unknown>;
 				disabled?: boolean;
 			}> = [];
 			const payload: Record<
@@ -641,9 +642,6 @@
 				const url = comp.url?.trim();
 				componentServersForCreate.push({
 					catalogEntryID: id,
-					manifest: url
-						? { remoteConfig: { url: url.startsWith('http') ? url : `https://${url}` } }
-						: {},
 					disabled: comp.disabled ?? false
 				});
 				const config: Record<string, string> = {};

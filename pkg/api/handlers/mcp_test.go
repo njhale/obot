@@ -1912,3 +1912,30 @@ func TestUpdateServerFromCatalogEntryPreservesValidHostnameURL(t *testing.T) {
 	assert.False(t, server.Spec.NeedsURL)
 	assert.Empty(t, server.Spec.PreviousURL)
 }
+
+func TestServerManifestFromCatalogEntryManifestDefersComponentURLs(t *testing.T) {
+	// A composite is created before its components exist, so a hostname-constrained component
+	// with no URL yet must not fail creation. The component comes up needing configuration.
+	entry := types.MCPServerCatalogEntryManifest{
+		Name:           "Composite",
+		Runtime:        types.RuntimeComposite,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{{
+			CatalogEntryID: "remote-entry",
+			Manifest: types.MCPServerCatalogEntryManifest{
+				Name:         "Remote",
+				Runtime:      types.RuntimeRemote,
+				RemoteConfig: &types.RemoteCatalogConfig{Hostname: "*.example.com"},
+			},
+		}}},
+	}
+
+	_, err := serverManifestFromCatalogEntryManifest(false, false, entry, types.MCPServerManifest{})
+	require.Error(t, err, "without deferral a component URL is required up front")
+
+	result, err := serverManifestFromCatalogEntryManifest(true, true, entry, types.MCPServerManifest{})
+	require.NoError(t, err)
+	require.NotNil(t, result.CompositeConfig)
+	require.Len(t, result.CompositeConfig.ComponentServers, 1)
+	assert.Equal(t, "remote-entry", result.CompositeConfig.ComponentServers[0].CatalogEntryID)
+}
