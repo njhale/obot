@@ -9,6 +9,7 @@
 		type OrgUser
 	} from '$lib/services';
 	import { isDeprecatedMCPServer } from '$lib/services/user/mcp';
+	import { componentsById, getComponentId } from '$lib/composite';
 	import { profile } from '$lib/stores';
 	import { openUrl } from '$lib/utils';
 	import McpDeprecatedNotice from '../mcp/McpDeprecatedNotice.svelte';
@@ -35,6 +36,8 @@
 	let { name, connectedUsers, classes, entityId, catalogEntry, mcpServerId, hideTitle }: Props =
 		$props();
 	let isAdminUrl = $derived(page.url.pathname.includes('/admin'));
+	// Component configuration is resolved from each component's source when the entry is read.
+	let resolvedComponents = $derived(componentsById(catalogEntry));
 	let servers = $state<MCPCatalogServer[]>([]);
 	let loadingServers = $state(true);
 	let failedToLoadServers = $state(false);
@@ -84,7 +87,10 @@
 				{@const multiUserServerId = componentServer.mcpServerID}
 				{@const componentServerId = catalogEntryServerId || multiUserServerId}
 				{@const componentExists = !!componentServerId}
-				{@const deprecated = isDeprecatedMCPServer(componentServer)}
+				{@const resolved = resolvedComponents.get(getComponentId(componentServer))}
+				{@const componentManifest = resolved?.manifest}
+				{@const componentName = componentManifest?.name ?? getComponentId(componentServer)}
+				{@const deprecated = isDeprecatedMCPServer(resolved)}
 
 				{#if componentExists}
 					<button
@@ -115,17 +121,13 @@
 					>
 						<div class="flex items-center gap-2">
 							<div class="icon">
-								{#if componentServer.manifest?.icon}
-									<img
-										src={componentServer.manifest?.icon}
-										alt={componentServer.manifest?.name}
-										class="size-6"
-									/>
+								{#if componentManifest?.icon}
+									<img src={componentManifest.icon} alt={componentName} class="size-6" />
 								{:else}
 									<Server class="size-6" />
 								{/if}
 							</div>
-							<p class="text-sm">{componentServer.manifest?.name}</p>
+							<p class="text-sm">{componentName}</p>
 							<McpDeprecatedNotice {deprecated} child />
 							{#if componentServerId}
 								<span class="text-muted-content text-sm">({componentServerId})</span>
@@ -141,17 +143,13 @@
 					>
 						<div class="flex items-center gap-2">
 							<div class="icon">
-								{#if componentServer.manifest?.icon}
-									<img
-										src={componentServer.manifest?.icon}
-										alt={componentServer.manifest?.name}
-										class="size-6"
-									/>
+								{#if componentManifest?.icon}
+									<img src={componentManifest.icon} alt={componentName} class="size-6" />
 								{:else}
 									<Server class="size-6" />
 								{/if}
 							</div>
-							<p class="text-sm">{componentServer.manifest?.name}</p>
+							<p class="text-sm">{componentName}</p>
 							<McpDeprecatedNotice {deprecated} child />
 							{#if loadingServers}
 								<span class="text-muted-content text-xs">Loading...</span>

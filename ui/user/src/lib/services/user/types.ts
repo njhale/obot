@@ -518,6 +518,8 @@ export interface MCPCatalogServer {
 	deploymentStatus?: string;
 	compositeName?: string;
 	canConnect?: boolean;
+	/** Resolved view of this composite's components. Read-only; ignored on write. */
+	components?: CompositeComponent[];
 }
 export interface OAuthMetadata {
 	protectedResourceUrl?: string;
@@ -631,6 +633,33 @@ export interface ComponentServer {
 	toolOverrides?: ToolOverride[];
 	toolPrefix?: string;
 	disabled?: boolean;
+}
+
+/**
+ * Resolved, read-only view of one component of a composite server or catalog entry,
+ * returned in the `components` field of the parent. The stored composite holds only the
+ * reference and its composition metadata; `manifest` is resolved from the referenced
+ * source at read time, so it is absent when `unresolved` is true.
+ */
+export interface CompositeComponent {
+	catalogEntryID?: string;
+	mcpServerID?: string;
+	toolPrefix?: string;
+	toolOverrides?: ToolOverride[];
+	disabled?: boolean;
+
+	manifest?: MCPServer;
+	unresolved?: boolean;
+
+	/** Set on composite MCP server responses only. */
+	serverID?: string;
+	instanceID?: string;
+	configured?: boolean;
+	needsURL?: boolean;
+	needsUpdate?: boolean;
+	missingRequiredEnvVars?: string[];
+	missingRequiredHeaders?: string[];
+	missingOAuthCredentials?: boolean;
 }
 export interface ToolOverride {
 	name: string;

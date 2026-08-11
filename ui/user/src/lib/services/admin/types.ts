@@ -9,6 +9,7 @@ import {
 	type ContainerizedRuntimeConfig,
 	type CompositeRuntimeConfig,
 	type ToolOverride,
+	type CompositeComponent,
 	type Schedule,
 	ModelAlias,
 	type AccessControlRuleSubject,
@@ -755,6 +756,8 @@ export interface MCPCatalogEntry {
 	needsK8sUpdate?: boolean;
 	oauthCredentialConfigured?: boolean;
 	connectURL?: string;
+	/** Resolved view of this composite entry's components. Read-only; ignored on write. */
+	components?: CompositeComponent[];
 }
 
 // Matches the backend compositeDeletionDependency struct used when preventing
