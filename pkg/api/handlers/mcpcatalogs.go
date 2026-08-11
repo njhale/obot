@@ -218,7 +218,11 @@ func (h *MCPCatalogHandler) ListEntries(req api.Context) error {
 	if (req.UserIsAdmin() || req.UserIsAuditor()) && req.URL.Query().Get("all") == "true" {
 		entries := make([]types.MCPServerCatalogEntry, 0, len(list.Items))
 		for _, entry := range list.Items {
-			entries = append(entries, ConvertMCPServerCatalogEntryWithWorkspace(entry, workspaceID, powerUserID, h.serverURL))
+			components, err := compositeComponentsForEntry(req, entry)
+			if err != nil {
+				return err
+			}
+			entries = append(entries, ConvertMCPServerCatalogEntryWithWorkspace(entry, workspaceID, powerUserID, h.serverURL, components...))
 		}
 		return req.Write(types.MCPServerCatalogEntryList{Items: entries})
 	}
@@ -247,7 +251,11 @@ func (h *MCPCatalogHandler) ListEntries(req api.Context) error {
 			if !req.UserIsAdmin() && entryRequiresStaticOAuthCreds(entry) {
 				continue
 			}
-			entries = append(entries, ConvertMCPServerCatalogEntryWithWorkspace(entry, workspaceID, powerUserID, h.serverURL))
+			components, err := compositeComponentsForEntry(req, entry)
+			if err != nil {
+				return err
+			}
+			entries = append(entries, ConvertMCPServerCatalogEntryWithWorkspace(entry, workspaceID, powerUserID, h.serverURL, components...))
 		}
 	}
 
@@ -282,16 +290,113 @@ func (h *MCPCatalogHandler) GetEntry(req api.Context) error {
 		return err
 	}
 
+	components, err := compositeComponentsForEntry(req, entry)
+	if err != nil {
+		return err
+	}
+
 	// For workspace entries, include powerUserId in the response
 	if workspaceID != "" {
 		var workspace v1.PowerUserWorkspace
 		if err := req.Get(&workspace, workspaceID); err != nil {
 			return fmt.Errorf("failed to get workspace for powerUserId: %w", err)
 		}
-		return req.Write(ConvertMCPServerCatalogEntryWithWorkspace(entry, workspaceID, workspace.Spec.UserID, h.serverURL))
+		return req.Write(ConvertMCPServerCatalogEntryWithWorkspace(entry, workspaceID, workspace.Spec.UserID, h.serverURL, components...))
 	}
 
-	return req.Write(ConvertMCPServerCatalogEntry(entry, h.serverURL))
+	return req.Write(ConvertMCPServerCatalogEntry(entry, h.serverURL, components...))
+}
+
+// ListEntryUsedBy returns the composite catalog entries that use this entry, or the multi-user
+// server deployed from it, as one of their components. Clients call this before deleting an
+// entry so the user can see what a deletion would break.
+// GET /api/mcp-catalogs/{catalog_id}/entries/{entry_id}/used-by
+// GET /api/workspaces/{workspace_id}/entries/{entry_id}/used-by
+func (h *MCPCatalogHandler) ListEntryUsedBy(req api.Context) error {
+	var (
+		catalogName = req.PathValue("catalog_id")
+		workspaceID = req.PathValue("workspace_id")
+		entryName   = req.PathValue("entry_id")
+	)
+
+	// Verify the scope exists
+	if catalogName != "" {
+		if err := req.Get(&v1.MCPCatalog{}, catalogName); err != nil {
+			return fmt.Errorf("failed to get catalog: %w", err)
+		}
+	} else if workspaceID != "" {
+		if err := req.Get(&v1.PowerUserWorkspace{}, workspaceID); err != nil {
+			return fmt.Errorf("failed to get workspace: %w", err)
+		}
+	} else {
+		return types.NewErrBadRequest("either catalog_id or workspace_id is required")
+	}
+
+	var entry v1.MCPServerCatalogEntry
+	if err := req.Get(&entry, entryName); err != nil {
+		return fmt.Errorf("failed to get entry: %w", err)
+	}
+
+	if err := validateEntryVisibleFromScope(entry, catalogName, workspaceID); err != nil {
+		return err
+	}
+
+	// A composite's component references live in a list, which cannot be indexed by a field
+	// selector, so narrow to composites and match in memory.
+	var composites v1.MCPServerCatalogEntryList
+	if err := req.List(&composites, client.MatchingFields{
+		"spec.manifest.runtime": string(types.RuntimeComposite),
+	}); err != nil {
+		return fmt.Errorf("failed to list composite entries: %w", err)
+	}
+
+	// Multi-user servers deployed from this entry are referenced by their own ID.
+	var deployedServers v1.MCPServerList
+	if err := req.List(&deployedServers, client.MatchingFields{
+		"spec.mcpServerCatalogEntryName": entry.Name,
+	}); err != nil {
+		return fmt.Errorf("failed to list servers for entry: %w", err)
+	}
+
+	referencedIDs := map[string]struct{}{entry.Name: {}}
+	for _, server := range deployedServers.Items {
+		if !server.Spec.IsSingleUser() {
+			referencedIDs[server.Name] = struct{}{}
+		}
+	}
+
+	references := make([]types.CompositeReference, 0, len(composites.Items))
+	for _, composite := range composites.Items {
+		if composite.Name == entry.Name || composite.Spec.Manifest.CompositeConfig == nil {
+			continue
+		}
+
+		var referenced bool
+		for _, component := range composite.Spec.Manifest.CompositeConfig.ComponentServers {
+			if id := component.ComponentID(); id != "" {
+				if _, ok := referencedIDs[id]; ok {
+					referenced = true
+					break
+				}
+			}
+		}
+		if !referenced {
+			continue
+		}
+
+		references = append(references, types.CompositeReference{
+			ID:        composite.Name,
+			Name:      composite.Spec.Manifest.Name,
+			UserCount: composite.Status.UserCount,
+			InUse:     composite.Status.UserCount > 0,
+		})
+	}
+
+	slices.SortFunc(references, func(a, b types.CompositeReference) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+
+	return req.Write(types.CompositeReferenceList{Items: references})
 }
 
 // CreateEntry creates a new entry for a catalog or workspace.
@@ -571,7 +676,7 @@ func (h *MCPCatalogHandler) AdminListServersForEntryInCatalog(req api.Context) e
 			return fmt.Errorf("failed to generate slug: %w", err)
 		}
 
-		var components []types.MCPServer
+		var components []types.CompositeComponent
 		if server.Spec.Manifest.Runtime == types.RuntimeComposite {
 			components, err = resolveCompositeComponents(req, server, h.secretBindingAllowedLabel)
 			if err != nil {
@@ -656,7 +761,7 @@ func (h *MCPCatalogHandler) AdminListServersForAllEntriesInCatalog(req api.Conte
 			return fmt.Errorf("failed to generate slug: %w", err)
 		}
 
-		var components []types.MCPServer
+		var components []types.CompositeComponent
 		if server.Spec.Manifest.Runtime == types.RuntimeComposite {
 			components, err = resolveCompositeComponents(req, server, h.secretBindingAllowedLabel)
 			if err != nil {
@@ -734,7 +839,7 @@ func (h *MCPCatalogHandler) ListServersForEntry(req api.Context) error {
 			return fmt.Errorf("failed to generate slug: %w", err)
 		}
 
-		var components []types.MCPServer
+		var components []types.CompositeComponent
 		if server.Spec.Manifest.Runtime == types.RuntimeComposite {
 			components, err = resolveCompositeComponents(req, server, h.secretBindingAllowedLabel)
 			if err != nil {
@@ -803,7 +908,7 @@ func (h *MCPCatalogHandler) GetServerFromEntry(req api.Context) error {
 		return fmt.Errorf("failed to generate slug: %w", err)
 	}
 
-	var components []types.MCPServer
+	var components []types.CompositeComponent
 	if server.Spec.Manifest.Runtime == types.RuntimeComposite {
 		components, err = resolveCompositeComponents(req, server, h.secretBindingAllowedLabel)
 		if err != nil {

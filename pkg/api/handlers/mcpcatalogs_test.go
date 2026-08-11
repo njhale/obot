@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -484,4 +485,134 @@ func TestPopulateComponentManifestsRejectsWorkspaceScopedComposites(t *testing.T
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not supported in power user workspaces")
+}
+
+func newUsedByRequest(t *testing.T, catalogID, entryID string, objects ...client.Object) api.Context {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.SetPathValue("catalog_id", catalogID)
+	req.SetPathValue("entry_id", entryID)
+
+	return api.Context{
+		Request:        req,
+		ResponseWriter: httptest.NewRecorder(),
+		User:           testUserWithRole("user-1", types.GroupAdmin),
+		Storage: storage.Client(fake.NewClientBuilder().
+			WithScheme(storagescheme.Scheme).
+			WithIndex(&v1.MCPServerCatalogEntry{}, "spec.manifest.runtime", func(obj client.Object) []string {
+				return []string{string(obj.(*v1.MCPServerCatalogEntry).Spec.Manifest.Runtime)}
+			}).
+			WithIndex(&v1.MCPServer{}, "spec.mcpServerCatalogEntryName", func(obj client.Object) []string {
+				name := obj.(*v1.MCPServer).Spec.MCPServerCatalogEntryName
+				if name == "" {
+					return nil
+				}
+				return []string{name}
+			}).
+			WithObjects(objects...).
+			Build()),
+	}
+}
+
+func usedByCatalogEntry(name, catalogName string, manifest types.MCPServerCatalogEntryManifest) *v1.MCPServerCatalogEntry {
+	return &v1.MCPServerCatalogEntry{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: system.DefaultNamespace},
+		Spec: v1.MCPServerCatalogEntrySpec{
+			MCPCatalogName: catalogName,
+			Manifest:       manifest,
+		},
+	}
+}
+
+func TestListEntryUsedByReportsReferencingCompositesAndTheirUsage(t *testing.T) {
+	catalog := &v1.MCPCatalog{ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: system.DefaultNamespace}}
+	component := usedByCatalogEntry("gmail", "default", types.MCPServerCatalogEntryManifest{
+		Name:           "Gmail",
+		Runtime:        types.RuntimeNPX,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "@example/gmail"},
+	})
+	usingComposite := usedByCatalogEntry("composite-using", "default", types.MCPServerCatalogEntryManifest{
+		Name:           "Using",
+		Runtime:        types.RuntimeComposite,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+			{CatalogEntryID: "gmail"},
+		}},
+	})
+	usingComposite.Status.UserCount = 3
+	otherComposite := usedByCatalogEntry("composite-other", "default", types.MCPServerCatalogEntryManifest{
+		Name:           "Other",
+		Runtime:        types.RuntimeComposite,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+			{CatalogEntryID: "slack"},
+		}},
+	})
+
+	req := newUsedByRequest(t, "default", "gmail", catalog, component, usingComposite, otherComposite)
+	require.NoError(t, (&MCPCatalogHandler{}).ListEntryUsedBy(req))
+
+	var result types.CompositeReferenceList
+	require.NoError(t, json.Unmarshal(req.ResponseWriter.(*httptest.ResponseRecorder).Body.Bytes(), &result))
+	require.Len(t, result.Items, 1)
+	assert.Equal(t, "composite-using", result.Items[0].ID)
+	assert.Equal(t, "Using", result.Items[0].Name)
+	assert.Equal(t, 3, result.Items[0].UserCount)
+	assert.True(t, result.Items[0].InUse)
+}
+
+func TestListEntryUsedByFindsCompositesReferencingADeployedMultiUserServer(t *testing.T) {
+	catalog := &v1.MCPCatalog{ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: system.DefaultNamespace}}
+	entry := usedByCatalogEntry("shared-entry", "default", types.MCPServerCatalogEntryManifest{
+		Name:           "Shared",
+		Runtime:        types.RuntimeContainerized,
+		ServerUserType: types.ServerUserTypeMultiUser,
+		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
+			Image: "example/shared", Port: 8080, Path: "/mcp",
+		},
+	})
+	deployed := &v1.MCPServer{
+		ObjectMeta: metav1.ObjectMeta{Name: "shared-server", Namespace: system.DefaultNamespace},
+		Spec: v1.MCPServerSpec{
+			MCPCatalogID:              "default",
+			MCPServerCatalogEntryName: "shared-entry",
+		},
+	}
+	// The composite references the deployed server, not the entry it came from.
+	composite := usedByCatalogEntry("composite-using", "default", types.MCPServerCatalogEntryManifest{
+		Name:           "Using",
+		Runtime:        types.RuntimeComposite,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+			{MCPServerID: "shared-server"},
+		}},
+	})
+
+	req := newUsedByRequest(t, "default", "shared-entry", catalog, entry, deployed, composite)
+	require.NoError(t, (&MCPCatalogHandler{}).ListEntryUsedBy(req))
+
+	var result types.CompositeReferenceList
+	require.NoError(t, json.Unmarshal(req.ResponseWriter.(*httptest.ResponseRecorder).Body.Bytes(), &result))
+	require.Len(t, result.Items, 1)
+	assert.Equal(t, "composite-using", result.Items[0].ID)
+	assert.False(t, result.Items[0].InUse)
+}
+
+func TestListEntryUsedByReturnsEmptyForAnUnreferencedEntry(t *testing.T) {
+	catalog := &v1.MCPCatalog{ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: system.DefaultNamespace}}
+	entry := usedByCatalogEntry("lonely", "default", types.MCPServerCatalogEntryManifest{
+		Name:           "Lonely",
+		Runtime:        types.RuntimeNPX,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "@example/lonely"},
+	})
+
+	req := newUsedByRequest(t, "default", "lonely", catalog, entry)
+	require.NoError(t, (&MCPCatalogHandler{}).ListEntryUsedBy(req))
+
+	var result types.CompositeReferenceList
+	require.NoError(t, json.Unmarshal(req.ResponseWriter.(*httptest.ResponseRecorder).Body.Bytes(), &result))
+	assert.Empty(t, result.Items)
 }

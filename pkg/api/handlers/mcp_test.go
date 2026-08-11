@@ -1357,29 +1357,29 @@ func TestConvertMCPServerCompositeAggregatesOnlySecretBoundMissingConfig(t *test
 		},
 	}
 
-	converted := ConvertMCPServer(server, map[string]string{}, "", "", types.MCPServer{
+	converted := ConvertMCPServer(server, map[string]string{}, "", "", types.CompositeComponent{
 		CatalogEntryID:         "entry-bound",
 		Configured:             false,
 		MissingRequiredEnvVars: []string{"BOUND_ENV", "USER_ENV"},
 		MissingRequiredHeaders: []string{"BOUND_HEADER", "USER_HEADER"},
-		MCPServerManifest: types.MCPServerManifest{
+		Manifest: types.MCPServerCatalogEntryManifest{
 			Runtime: types.RuntimeRemote,
 			Env: []types.MCPEnv{
 				{MCPHeader: types.MCPHeader{Key: "BOUND_ENV", SecretBinding: &types.MCPSecretBinding{Name: "secret", Key: "env"}}},
 				{MCPHeader: types.MCPHeader{Key: "USER_ENV"}},
 			},
-			RemoteConfig: &types.RemoteRuntimeConfig{
+			RemoteConfig: &types.RemoteCatalogConfig{
 				Headers: []types.MCPHeader{
 					{Key: "BOUND_HEADER", SecretBinding: &types.MCPSecretBinding{Name: "secret", Key: "header"}},
 					{Key: "USER_HEADER"},
 				},
 			},
 		},
-	}, types.MCPServer{
+	}, types.CompositeComponent{
 		CatalogEntryID:         "entry-user",
 		Configured:             false,
 		MissingRequiredEnvVars: []string{"SHARED_KEY"},
-		MCPServerManifest: types.MCPServerManifest{
+		Manifest: types.MCPServerCatalogEntryManifest{
 			Env: []types.MCPEnv{{MCPHeader: types.MCPHeader{Key: "SHARED_KEY"}}},
 		},
 	})
@@ -1387,6 +1387,7 @@ func TestConvertMCPServerCompositeAggregatesOnlySecretBoundMissingConfig(t *test
 	assert.False(t, converted.Configured)
 	assert.Equal(t, []string{"PARENT_BOUND", "BOUND_ENV"}, converted.MissingRequiredEnvVars)
 	assert.Equal(t, []string{"BOUND_HEADER"}, converted.MissingRequiredHeaders)
+	assert.Len(t, converted.Components, 2, "the resolved components are surfaced on the response")
 }
 
 func TestConvertMCPServerCompositeSkipsDisabledAndConfiguredComponents(t *testing.T) {
@@ -1404,14 +1405,15 @@ func TestConvertMCPServerCompositeSkipsDisabledAndConfiguredComponents(t *testin
 		},
 	}
 
-	converted := ConvertMCPServer(server, nil, "", "", types.MCPServer{
+	converted := ConvertMCPServer(server, nil, "", "", types.CompositeComponent{
 		CatalogEntryID:         "entry-disabled",
+		Disabled:               true,
 		Configured:             false,
 		MissingRequiredEnvVars: []string{"BOUND_DISABLED"},
-		MCPServerManifest: types.MCPServerManifest{
+		Manifest: types.MCPServerCatalogEntryManifest{
 			Env: []types.MCPEnv{{MCPHeader: types.MCPHeader{Key: "BOUND_DISABLED", SecretBinding: &types.MCPSecretBinding{Name: "secret", Key: "env"}}}},
 		},
-	}, types.MCPServer{
+	}, types.CompositeComponent{
 		CatalogEntryID: "entry-configured",
 		Configured:     true,
 	})
@@ -1419,6 +1421,59 @@ func TestConvertMCPServerCompositeSkipsDisabledAndConfiguredComponents(t *testin
 	assert.True(t, converted.Configured)
 	assert.Empty(t, converted.MissingRequiredEnvVars)
 	assert.Empty(t, converted.MissingRequiredHeaders)
+}
+
+func TestConvertMCPServerCompositeSkipsDisabledMultiUserComponent(t *testing.T) {
+	// Disabled state used to be looked up by catalog entry ID only, so a disabled multi-user
+	// component was still treated as unconfigured.
+	server := v1.MCPServer{
+		Spec: v1.MCPServerSpec{
+			Manifest: types.MCPServerManifest{
+				Runtime: types.RuntimeComposite,
+				CompositeConfig: &types.CompositeRuntimeConfig{
+					ComponentServers: []types.ComponentServer{{MCPServerID: "shared-server", Disabled: true}},
+				},
+			},
+		},
+	}
+
+	converted := ConvertMCPServer(server, nil, "", "", types.CompositeComponent{
+		MCPServerID:            "shared-server",
+		Disabled:               true,
+		Configured:             false,
+		MissingRequiredHeaders: []string{"API_KEY"},
+		Manifest: types.MCPServerCatalogEntryManifest{
+			RemoteConfig: &types.RemoteCatalogConfig{
+				Headers: []types.MCPHeader{{Key: "API_KEY", SecretBinding: &types.MCPSecretBinding{Name: "secret", Key: "api"}}},
+			},
+		},
+	})
+
+	assert.True(t, converted.Configured)
+	assert.Empty(t, converted.MissingRequiredHeaders)
+}
+
+func TestConvertMCPServerCompositeSurfacesComponentMissingOAuthCredentials(t *testing.T) {
+	server := v1.MCPServer{
+		Spec: v1.MCPServerSpec{
+			Manifest: types.MCPServerManifest{
+				Runtime: types.RuntimeComposite,
+				CompositeConfig: &types.CompositeRuntimeConfig{
+					ComponentServers: []types.ComponentServer{{CatalogEntryID: "remote-entry"}},
+				},
+			},
+		},
+	}
+
+	converted := ConvertMCPServer(server, nil, "", "", types.CompositeComponent{
+		CatalogEntryID:          "remote-entry",
+		Configured:              false,
+		MissingOAuthCredentials: true,
+	})
+
+	assert.False(t, converted.Configured)
+	assert.True(t, converted.MissingOAuthCredentials,
+		"a component whose static OAuth credentials are unset must surface on the composite")
 }
 
 func TestServerManifestFromCatalogEntryManifestAllowsMissingRemoteHostname(t *testing.T) {

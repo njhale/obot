@@ -224,11 +224,39 @@ func HideMultiUserCatalogEntry(req api.Context, entry v1.MCPServerCatalogEntry) 
 	return !req.UserIsPowerUserPlus() && !entry.Spec.Manifest.ServerUserType.IsSingleUser()
 }
 
-func ConvertMCPServerCatalogEntry(entry v1.MCPServerCatalogEntry, serverURL string) types.MCPServerCatalogEntry {
-	return ConvertMCPServerCatalogEntryWithWorkspace(entry, "", "", serverURL)
+func ConvertMCPServerCatalogEntry(entry v1.MCPServerCatalogEntry, serverURL string, components ...types.CompositeComponent) types.MCPServerCatalogEntry {
+	return ConvertMCPServerCatalogEntryWithWorkspace(entry, "", "", serverURL, components...)
 }
 
-func ConvertMCPServerCatalogEntryWithWorkspace(entry v1.MCPServerCatalogEntry, powerUserWorkspaceID, powerUserID, serverURL string) types.MCPServerCatalogEntry {
+// compositeComponentsForEntry returns the resolved view of a composite catalog entry's
+// component sources, in the order they appear in the entry. It returns nil for entries that
+// are not composite.
+func compositeComponentsForEntry(req api.Context, entry v1.MCPServerCatalogEntry) ([]types.CompositeComponent, error) {
+	if entry.Spec.Manifest.Runtime != types.RuntimeComposite || entry.Spec.Manifest.CompositeConfig == nil {
+		return nil, nil
+	}
+
+	resolved, err := mcp.ResolveComponents(req.Context(), req.Storage, entry.Namespace, entry.Spec.Manifest.CompositeConfig.ComponentServers)
+	if err != nil {
+		return nil, err
+	}
+
+	components := make([]types.CompositeComponent, 0, len(resolved))
+	for _, component := range resolved {
+		components = append(components, types.CompositeComponent{
+			CatalogEntryID: component.Ref.CatalogEntryID,
+			MCPServerID:    component.Ref.MCPServerID,
+			ToolPrefix:     component.Ref.ToolPrefix,
+			ToolOverrides:  component.Ref.ToolOverrides,
+			Manifest:       component.CatalogEntryManifest(),
+			Unresolved:     component.Unresolved(),
+		})
+	}
+
+	return components, nil
+}
+
+func ConvertMCPServerCatalogEntryWithWorkspace(entry v1.MCPServerCatalogEntry, powerUserWorkspaceID, powerUserID, serverURL string, components ...types.CompositeComponent) types.MCPServerCatalogEntry {
 	// Add extracted env vars directly to the entry
 	addExtractedEnvVarsToCatalogEntry(&entry)
 
@@ -247,6 +275,7 @@ func ConvertMCPServerCatalogEntryWithWorkspace(entry v1.MCPServerCatalogEntry, p
 		NeedsUpdate:               entry.Status.NeedsUpdate,
 		OAuthCredentialConfigured: entry.Status.OAuthCredentialConfigured,
 		ConnectURL:                defaultCatalogEntryConnectURL(serverURL, entry),
+		Components:                components,
 	}
 }
 
@@ -366,7 +395,7 @@ func (m *MCPHandler) ListServer(req api.Context) error {
 			return fmt.Errorf("failed to determine slug: %w", err)
 		}
 
-		var components []types.MCPServer
+		var components []types.CompositeComponent
 		if server.Spec.Manifest.Runtime == types.RuntimeComposite {
 			components, err = resolveCompositeComponents(req, server, m.secretBindingAllowedLabel)
 			if err != nil {
@@ -430,7 +459,7 @@ func (m *MCPHandler) GetServer(req api.Context) error {
 		return fmt.Errorf("failed to generate slug: %w", err)
 	}
 
-	var components []types.MCPServer
+	var components []types.CompositeComponent
 	if server.Spec.Manifest.Runtime == types.RuntimeComposite {
 		components, err = resolveCompositeComponents(req, server, m.secretBindingAllowedLabel)
 		if err != nil {
@@ -2769,7 +2798,7 @@ func addExtractedEnvVarsToCatalogEntryManifest(manifest *types.MCPServerCatalogE
 	}
 }
 
-func ConvertMCPServer(server v1.MCPServer, credEnv map[string]string, serverURL, slug string, components ...types.MCPServer) types.MCPServer {
+func ConvertMCPServer(server v1.MCPServer, credEnv map[string]string, serverURL, slug string, components ...types.CompositeComponent) types.MCPServer {
 	var missingEnvVars, missingHeaders []string
 
 	// Check for missing required env vars. credEnv is expected to be the
@@ -2871,31 +2900,37 @@ func ConvertMCPServer(server v1.MCPServer, credEnv map[string]string, serverURL,
 	// For composite servers, also consider component configuration if provided
 	if server.Spec.Manifest.Runtime == types.RuntimeComposite &&
 		server.Spec.Manifest.CompositeConfig != nil && len(components) > 0 {
-		var (
-			componentServers   = server.Spec.Manifest.CompositeConfig.ComponentServers
-			disabledComponents = make(map[string]bool, len(componentServers))
-		)
+		converted.Components = components
+
 		if credEnv != nil {
 			converted.MissingRequiredEnvVars, converted.MissingRequiredHeaders = secretBoundMissingConfig(converted)
 		} else {
 			converted.MissingRequiredEnvVars = nil
 			converted.MissingRequiredHeaders = nil
 		}
-		for _, comp := range componentServers {
-			if id := comp.ComponentID(); id != "" {
-				disabledComponents[id] = comp.Disabled
-			}
-		}
 
 		for _, component := range components {
-			if component.CatalogEntryID != "" && disabledComponents[component.CatalogEntryID] || component.Configured {
+			if component.Disabled || component.Configured {
 				continue
 			}
 
-			missingEnvVars, missingHeaders := secretBoundMissingConfig(component)
+			var headers []types.MCPHeader
+			if component.Manifest.RemoteConfig != nil {
+				headers = component.Manifest.RemoteConfig.Headers
+			}
+
+			missingEnvVars, missingHeaders := secretBoundMissingFields(
+				component.Manifest.Env,
+				headers,
+				component.MissingRequiredEnvVars,
+				component.MissingRequiredHeaders,
+			)
 			converted.MissingRequiredEnvVars = append(converted.MissingRequiredEnvVars, missingEnvVars...)
 			converted.MissingRequiredHeaders = append(converted.MissingRequiredHeaders, missingHeaders...)
 			converted.Configured = false
+			if component.MissingOAuthCredentials {
+				converted.MissingOAuthCredentials = true
+			}
 		}
 	}
 
@@ -2930,7 +2965,7 @@ func ConfigurationTargetForConnectID(req api.Context, id, serverURL, secretBindi
 		return nil, nil, fmt.Errorf("failed to determine MCP server slug: %w", err)
 	}
 
-	var components []types.MCPServer
+	var components []types.CompositeComponent
 	if server.Spec.Manifest.Runtime == types.RuntimeComposite {
 		components, err = resolveCompositeComponents(req, server, secretBindingAllowedLabel)
 		if err != nil {
@@ -2969,35 +3004,44 @@ func credentialEnvForMCPServer(req api.Context, server v1.MCPServer, secretBindi
 }
 
 func secretBoundMissingConfig(server types.MCPServer) (missingEnvVars, missingHeaders []string) {
-	missingEnvKeys := make(map[string]struct{}, len(server.MissingRequiredEnvVars))
-	for _, key := range server.MissingRequiredEnvVars {
-		missingEnvKeys[key] = struct{}{}
+	var headers []types.MCPHeader
+	if server.MCPServerManifest.RemoteConfig != nil {
+		headers = server.MCPServerManifest.RemoteConfig.Headers
 	}
-	for _, env := range server.MCPServerManifest.Env {
-		if env.SecretBinding == nil {
+
+	return secretBoundMissingFields(server.MCPServerManifest.Env, headers, server.MissingRequiredEnvVars, server.MissingRequiredHeaders)
+}
+
+// secretBoundMissingFields narrows a set of missing required field names down to the ones bound
+// to a pre-existing secret, which are administrator-managed rather than user-supplied.
+func secretBoundMissingFields(env []types.MCPEnv, headers []types.MCPHeader, missingEnvVars, missingHeaders []string) (envKeys, headerKeys []string) {
+	missingEnvNames := make(map[string]struct{}, len(missingEnvVars))
+	for _, key := range missingEnvVars {
+		missingEnvNames[key] = struct{}{}
+	}
+	for _, e := range env {
+		if e.SecretBinding == nil {
 			continue
 		}
-		if _, ok := missingEnvKeys[env.Key]; ok {
-			missingEnvVars = append(missingEnvVars, env.Key)
+		if _, ok := missingEnvNames[e.Key]; ok {
+			envKeys = append(envKeys, e.Key)
 		}
 	}
 
-	missingHeaderKeys := make(map[string]struct{}, len(server.MissingRequiredHeaders))
-	for _, key := range server.MissingRequiredHeaders {
-		missingHeaderKeys[key] = struct{}{}
+	missingHeaderNames := make(map[string]struct{}, len(missingHeaders))
+	for _, key := range missingHeaders {
+		missingHeaderNames[key] = struct{}{}
 	}
-	if server.MCPServerManifest.RemoteConfig != nil {
-		for _, header := range server.MCPServerManifest.RemoteConfig.Headers {
-			if header.SecretBinding == nil {
-				continue
-			}
-			if _, ok := missingHeaderKeys[header.Key]; ok {
-				missingHeaders = append(missingHeaders, header.Key)
-			}
+	for _, header := range headers {
+		if header.SecretBinding == nil {
+			continue
+		}
+		if _, ok := missingHeaderNames[header.Key]; ok {
+			headerKeys = append(headerKeys, header.Key)
 		}
 	}
 
-	return missingEnvVars, missingHeaders
+	return envKeys, headerKeys
 }
 
 func convertOAuthMetadata(metadata *v1.OAuthMetadata) *types.OAuthMetadata {
@@ -3053,13 +3097,17 @@ func SlugForMCPServer(ctx context.Context, client kclient.Client, server v1.MCPS
 
 // resolveCompositeComponents lists components of a composite MCP server, reveals their credentials, and
 // converts them to the public API type.
-func resolveCompositeComponents(req api.Context, composite v1.MCPServer, secretBindingAllowedLabel string) ([]types.MCPServer, error) {
-	var (
-		componentServers    v1.MCPServerList
-		componentInstances  v1.MCPServerInstanceList
-		convertedComponents []types.MCPServer
-	)
+// resolveCompositeComponents returns the resolved view of a composite server's components, in
+// the order they appear in the composite. Each component pairs its reference and composition
+// metadata with the live source configuration and the state of the per-user object
+// materialized for it.
+func resolveCompositeComponents(req api.Context, composite v1.MCPServer, secretBindingAllowedLabel string) ([]types.CompositeComponent, error) {
+	compositeConfig := composite.Spec.Manifest.CompositeConfig
+	if compositeConfig == nil {
+		return nil, nil
+	}
 
+	var componentServers v1.MCPServerList
 	if err := req.List(&componentServers, &kclient.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("spec.compositeName", composite.Name),
 		Namespace:     composite.Namespace,
@@ -3067,6 +3115,7 @@ func resolveCompositeComponents(req api.Context, composite v1.MCPServer, secretB
 		return nil, fmt.Errorf("failed to list composite child servers: %w", err)
 	}
 
+	var componentInstances v1.MCPServerInstanceList
 	if err := req.List(&componentInstances, &kclient.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("spec.compositeName", composite.Name),
 		Namespace:     composite.Namespace,
@@ -3074,37 +3123,89 @@ func resolveCompositeComponents(req api.Context, composite v1.MCPServer, secretB
 		return nil, fmt.Errorf("failed to list composite child server instances: %w", err)
 	}
 
-	for _, component := range componentServers.Items {
-		cred, err := req.GatewayClient.RevealCredential(req.Context(), []string{fmt.Sprintf("%s-%s", component.Spec.UserID, component.Name)}, component.Name)
-		if err != nil && !errors.As(err, &gateway.CredentialNotFoundError{}) {
-			return nil, fmt.Errorf("failed to reveal credential for component %s: %w", component.Name, err)
+	childServers := make(map[string]v1.MCPServer, len(componentServers.Items))
+	for _, child := range componentServers.Items {
+		if id := child.Spec.MCPServerCatalogEntryName; id != "" {
+			childServers[id] = child
 		}
-
-		addExtractedEnvVars(&component)
-		mergedEnv, err := mcp.MergeBoundCreds(req.Context(), req.LocalK8sClient, req.ObotNamespace, component.Spec.Manifest.Env, component.Spec.Manifest.RemoteConfig, cred.Secrets, secretBindingAllowedLabel)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve secret bindings for component %s: %w", component.Name, err)
-		}
-		// No slug/URL needed; only Configured/NeedsURL are used from the component
-		convertedComponents = append(convertedComponents, ConvertMCPServer(component, mergedEnv, "", ""))
 	}
 
+	childInstances := make(map[string]v1.MCPServerInstance, len(componentInstances.Items))
 	for _, instance := range componentInstances.Items {
-		credEnv, err := mcpServerInstanceCredEnv(req, instance)
-		if err != nil {
-			return nil, fmt.Errorf("failed to reveal credential for component instance %s: %w", instance.Name, err)
+		if id := instance.Spec.MCPServerName; id != "" {
+			childInstances[id] = instance
 		}
+	}
 
-		_, _, missingHeaders := mcpServerInstanceHeaders(instance, credEnv)
-		// No slug/URL needed; only CatalogEntryID and Configured are used from the component.
-		convertedComponents = append(convertedComponents, types.MCPServer{
-			CatalogEntryID:         instance.Spec.MCPServerName,
-			Configured:             len(missingHeaders) == 0,
-			MissingRequiredHeaders: missingHeaders,
+	refs := make([]types.CatalogComponentServer, 0, len(compositeConfig.ComponentServers))
+	for _, component := range compositeConfig.ComponentServers {
+		refs = append(refs, types.CatalogComponentServer{
+			CatalogEntryID: component.CatalogEntryID,
+			MCPServerID:    component.MCPServerID,
 		})
 	}
 
-	return convertedComponents, nil
+	resolved, err := mcp.ResolveComponents(req.Context(), req.Storage, composite.Namespace, refs)
+	if err != nil {
+		return nil, err
+	}
+
+	components := make([]types.CompositeComponent, 0, len(compositeConfig.ComponentServers))
+	for i, component := range compositeConfig.ComponentServers {
+		converted := types.CompositeComponent{
+			CatalogEntryID: component.CatalogEntryID,
+			MCPServerID:    component.MCPServerID,
+			ToolPrefix:     component.ToolPrefix,
+			ToolOverrides:  component.ToolOverrides,
+			Disabled:       component.Disabled,
+			Manifest:       resolved[i].CatalogEntryManifest(),
+			Unresolved:     resolved[i].Unresolved(),
+		}
+
+		if component.MCPServerID != "" {
+			if instance, ok := childInstances[component.MCPServerID]; ok {
+				credEnv, err := mcpServerInstanceCredEnv(req, instance)
+				if err != nil {
+					return nil, fmt.Errorf("failed to reveal credential for component instance %s: %w", instance.Name, err)
+				}
+
+				_, _, missingHeaders := mcpServerInstanceHeaders(instance, credEnv)
+				converted.InstanceID = instance.Name
+				converted.MissingRequiredHeaders = missingHeaders
+				converted.Configured = len(missingHeaders) == 0
+			}
+
+			components = append(components, converted)
+			continue
+		}
+
+		if child, ok := childServers[component.CatalogEntryID]; ok {
+			cred, err := req.GatewayClient.RevealCredential(req.Context(), []string{fmt.Sprintf("%s-%s", child.Spec.UserID, child.Name)}, child.Name)
+			if err != nil && !errors.As(err, &gateway.CredentialNotFoundError{}) {
+				return nil, fmt.Errorf("failed to reveal credential for component %s: %w", child.Name, err)
+			}
+
+			addExtractedEnvVars(&child)
+			mergedEnv, err := mcp.MergeBoundCreds(req.Context(), req.LocalK8sClient, req.ObotNamespace, child.Spec.Manifest.Env, child.Spec.Manifest.RemoteConfig, cred.Secrets, secretBindingAllowedLabel)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve secret bindings for component %s: %w", child.Name, err)
+			}
+
+			// No slug or server URL is needed: only the component's configuration state is used.
+			childView := ConvertMCPServer(child, mergedEnv, "", "")
+			converted.ServerID = child.Name
+			converted.Configured = childView.Configured
+			converted.NeedsURL = childView.NeedsURL
+			converted.NeedsUpdate = childView.NeedsUpdate
+			converted.MissingRequiredEnvVars = childView.MissingRequiredEnvVars
+			converted.MissingRequiredHeaders = childView.MissingRequiredHeaders
+			converted.MissingOAuthCredentials = childView.MissingOAuthCredentials
+		}
+
+		components = append(components, converted)
+	}
+
+	return components, nil
 }
 
 func (m *MCPHandler) ListServersFromAllSources(req api.Context) error {
@@ -3200,7 +3301,7 @@ func (m *MCPHandler) ListServersFromAllSources(req api.Context) error {
 		}
 
 		// Resolve components via helper for composite servers
-		var components []types.MCPServer
+		var components []types.CompositeComponent
 		if server.Spec.Manifest.Runtime == types.RuntimeComposite {
 			components, err = resolveCompositeComponents(req, server, m.secretBindingAllowedLabel)
 			if err != nil {

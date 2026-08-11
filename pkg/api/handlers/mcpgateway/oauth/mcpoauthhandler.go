@@ -60,9 +60,13 @@ func (f *MCPOAuthHandlerFactory) CheckForMCPAuth(req api.Context, mcpServer v1.M
 			compositeConfig = *mcpServer.Spec.Manifest.CompositeConfig
 		}
 
+		// Keyed by ComponentID so a multi-user component is matched too, should this loop ever
+		// examine component instances as well as component servers.
 		disabled := make(map[string]bool, len(compositeConfig.ComponentServers))
 		for _, comp := range compositeConfig.ComponentServers {
-			disabled[comp.CatalogEntryID] = comp.Disabled
+			if id := comp.ComponentID(); id != "" {
+				disabled[id] = comp.Disabled
+			}
 		}
 
 		for _, componentServer := range componentServers.Items {

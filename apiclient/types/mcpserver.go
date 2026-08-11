@@ -153,6 +153,60 @@ func (c ComponentServer) ComponentID() string {
 	return c.MCPServerID
 }
 
+// CompositeComponent is the resolved, read-only view of one component of a composite MCP
+// server or catalog entry. It is populated on read from the referenced source and is ignored
+// on write: the stored composite holds only the reference and its composition metadata.
+type CompositeComponent struct {
+	// Reference to the component's source. Exactly one is set.
+	CatalogEntryID string `json:"catalogEntryID,omitempty"`
+	MCPServerID    string `json:"mcpServerID,omitempty"`
+
+	// Composition metadata, echoed from the composite so clients need no join.
+	ToolPrefix    string         `json:"toolPrefix,omitempty"`
+	ToolOverrides []ToolOverride `json:"toolOverrides,omitempty"`
+	Disabled      bool           `json:"disabled,omitempty"`
+
+	// Manifest is the component's source configuration. Multi-user server components are
+	// converted to catalog entry form so both kinds of component present the same shape.
+	// Zero when the reference does not resolve.
+	Manifest MCPServerCatalogEntryManifest `json:"manifest,omitzero"`
+
+	// Unresolved reports that the reference did not point at a live source.
+	Unresolved bool `json:"unresolved,omitempty"`
+
+	// The fields below describe the per-user object materialized for this component and are
+	// only populated on MCPServer responses.
+	ServerID                string   `json:"serverID,omitempty"`
+	InstanceID              string   `json:"instanceID,omitempty"`
+	Configured              bool     `json:"configured,omitempty"`
+	NeedsURL                bool     `json:"needsURL,omitempty"`
+	NeedsUpdate             bool     `json:"needsUpdate,omitempty"`
+	MissingRequiredEnvVars  []string `json:"missingRequiredEnvVars,omitempty"`
+	MissingRequiredHeaders  []string `json:"missingRequiredHeaders,omitempty"`
+	MissingOAuthCredentials bool     `json:"missingOAuthCredentials,omitempty"`
+}
+
+// ComponentID returns the ID identifying this component within its composite.
+func (c CompositeComponent) ComponentID() string {
+	if c.CatalogEntryID != "" {
+		return c.CatalogEntryID
+	}
+
+	return c.MCPServerID
+}
+
+// CompositeReference identifies a composite catalog entry that uses another catalog entry or
+// multi-user server as one of its components. It is used to warn before deleting something a
+// composite depends on.
+type CompositeReference struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	UserCount int    `json:"userCount,omitempty"`
+	InUse     bool   `json:"inUse,omitempty"`
+}
+
+type CompositeReferenceList List[CompositeReference]
+
 type MCPServerCatalogEntry struct {
 	Metadata
 	Manifest                  MCPServerCatalogEntryManifest `json:"manifest"`
@@ -170,6 +224,10 @@ type MCPServerCatalogEntry struct {
 
 	// ConnectURL is the default URL clients can use to connect before configuring a personal server.
 	ConnectURL string `json:"connectURL,omitempty"`
+
+	// Components is the resolved view of a composite entry's referenced component sources, in
+	// the order they appear in the composite. Read-only; ignored on write.
+	Components []CompositeComponent `json:"components,omitempty"`
 }
 
 type MCPResourceRequirements struct {
@@ -374,6 +432,11 @@ type MCPServer struct {
 
 	// CompositeName is the name of the composite server that this MCP server is a component of, if there is one.
 	CompositeName string `json:"compositeName,omitempty"`
+
+	// Components is the resolved view of a composite server's components, in the order they
+	// appear in the composite, carrying each component's per-user configuration state.
+	// Read-only; ignored on write.
+	Components []CompositeComponent `json:"components,omitempty"`
 }
 
 // IsSingleUser returns true if this is a single-user MCP server.

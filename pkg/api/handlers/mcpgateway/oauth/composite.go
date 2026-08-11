@@ -52,9 +52,13 @@ func (h *handler) checkCompositeAuth(req api.Context) error {
 		compositeConfig = *compositeServer.Spec.Manifest.CompositeConfig
 	}
 
+	// Keyed by ComponentID so a multi-user component is matched too, should this loop ever
+	// examine component instances as well as component servers.
 	disabledComponents := make(map[string]bool, len(compositeConfig.ComponentServers))
 	for _, comp := range compositeConfig.ComponentServers {
-		disabledComponents[comp.CatalogEntryID] = comp.Disabled
+		if id := comp.ComponentID(); id != "" {
+			disabledComponents[id] = comp.Disabled
+		}
 	}
 
 	for _, componentServer := range componentServers.Items {
