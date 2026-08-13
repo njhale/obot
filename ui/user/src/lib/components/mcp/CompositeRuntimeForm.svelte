@@ -3,6 +3,7 @@
 	import Loading from '$lib/icons/Loading.svelte';
 	import {
 		AdminService,
+		type CatalogComponentServer,
 		type CompositeCatalogConfig,
 		type MCPCatalogEntry,
 		type MCPCatalogServer,
@@ -189,17 +190,28 @@
 		return c.catalogEntryID || c.mcpServerID || '';
 	}
 
-	// Build a configuring entry backed by the composite's manifest snapshot when
-	// configuring tools for an existing entry
+	function getComponentSource(c: { catalogEntryID?: string; mcpServerID?: string }) {
+		const componentId = getComponentId(c);
+		return componentServers.get(componentId) || componentEntries.find((e) => e.id === componentId);
+	}
+
+	function refsOnlyComponent(component: CatalogComponentServer): CatalogComponentServer {
+		return {
+			catalogEntryID: component.catalogEntryID,
+			mcpServerID: component.mcpServerID,
+			toolOverrides: component.toolOverrides,
+			toolPrefix: component.toolPrefix
+		};
+	}
+
+	// Configure existing components from the current source returned by the API.
 	function buildCompositeConfiguringEntry(
 		componentId: string
 	): MCPCatalogEntry | MCPCatalogServer | undefined {
 		const component = config.componentServers?.find((c) => getComponentId(c) === componentId);
-		if (!component || !component.manifest || (!component.catalogEntryID && !component.mcpServerID))
-			return undefined;
+		if (!component || (!component.catalogEntryID && !component.mcpServerID)) return undefined;
 
 		if (component.mcpServerID) {
-			// This is a multi-user server, we should always use the live value since they should always exist
 			const catalogServer = componentServers.get(component.mcpServerID);
 			if (catalogServer) return catalogServer;
 
@@ -207,24 +219,7 @@
 		}
 
 		const catalogEntry = componentEntries.find((e) => e.id === componentId);
-		if (catalogEntry) {
-			return {
-				...catalogEntry,
-				manifest: component.manifest
-			};
-		}
-
-		// Fallback minimal entry if metadata isn't loaded; sufficient for Configure Tools.
-		return {
-			id: componentId,
-			created: new Date().toISOString(),
-			manifest: component.manifest,
-			sourceURL: undefined,
-			userCount: undefined,
-			type: 'catalog-entry',
-			isCatalogEntry: !component.mcpServerID,
-			needsUpdate: false
-		};
+		return catalogEntry;
 	}
 
 	// Check if a component is newly added (not yet persisted to the composite entry)
@@ -261,9 +256,10 @@
 			if (!overrides.length) continue;
 
 			const componentId = getComponentId(component);
-			const manifestPreview = component.manifest?.toolPreview || [];
-			const entryPreview = entryById.get(componentId)?.manifest?.toolPreview || [];
-			const preview = manifestPreview.length ? manifestPreview : entryPreview;
+			const preview =
+				entryById.get(componentId)?.manifest?.toolPreview ||
+				componentServers.get(componentId)?.manifest?.toolPreview ||
+				[];
 
 			// If overrides exist, only show those overrides (use preview to enrich descriptions when present)
 			// Preview of all tools should only be used when user explicitly populates for the first time
@@ -342,7 +338,12 @@
 	onMount(() => {
 		// Capture the initial component IDs on first mount before any user interactions
 		initialComponentIds = new Set((config?.componentServers || []).map((c) => getComponentId(c)));
-		loadComponentEntries();
+		// Catalog component manifests are response-only resolved data. Keep the
+		// bound form refs-only so edits never submit those manifests back.
+		config.componentServers = config.componentServers.map(
+			refsOnlyComponent
+		) as typeof config.componentServers;
+		void loadComponentEntries();
 	});
 
 	function removeServer(componentId: string) {
@@ -370,20 +371,28 @@
 		{:else if config.componentServers.length > 0}
 			{#each config.componentServers as entry (getComponentId(entry))}
 				{@const componentId = getComponentId(entry)}
+				{@const componentSource = getComponentSource(entry)}
 				{@const headerSeverity = componentSeverity(entry)}
-				{@const deprecated = isDeprecatedMCPServer(entry)}
+				{@const deprecated = isDeprecatedMCPServer(componentSource)}
 				<div
 					class="dark:bg-base-300 dark:border-base-400 rounded-lg border border-gray-200 bg-gray-50"
 				>
 					<div class="flex items-center gap-3 p-3">
-						{#if entry.manifest?.icon}
-							<img src={entry.manifest.icon} alt={entry.manifest.name} class="size-8" />
+						{#if componentSource?.manifest?.icon}
+							<img
+								src={componentSource.manifest.icon}
+								alt={componentSource.manifest.name}
+								class="size-8"
+							/>
 						{:else}
 							<Server class="text-muted-content size-8" />
 						{/if}
 						<div class="flex min-w-0 flex-1 items-center gap-1.5">
-							<div class="truncate font-medium" title={entry.manifest?.name || 'Unnamed Server'}>
-								{entry.manifest?.name || 'Unnamed Server'}
+							<div
+								class="truncate font-medium"
+								title={componentSource?.manifest?.name || componentId}
+							>
+								{componentSource?.manifest?.name || componentId}
 							</div>
 							<McpDeprecatedNotice {deprecated} child />
 							{#if headerSeverity}
@@ -682,16 +691,18 @@
 		const idx = (config.componentServers || []).findIndex((c) => getComponentId(c) === id);
 
 		if (idx >= 0) {
-			const prev = config.componentServers[idx];
+			const prev = refsOnlyComponent(config.componentServers[idx]);
+			const refsOnlyComponentConfig = refsOnlyComponent(componentConfig);
 			config.componentServers = [
 				...config.componentServers.slice(0, idx),
-				{ ...prev, ...componentConfig },
+				{ ...prev, ...refsOnlyComponentConfig },
 				...config.componentServers.slice(idx + 1)
 			] as unknown as typeof config.componentServers;
 		} else {
+			const refsOnlyComponentConfig = refsOnlyComponent(componentConfig);
 			config.componentServers = [
 				...config.componentServers,
-				componentConfig
+				refsOnlyComponentConfig
 			] as unknown as typeof config.componentServers;
 		}
 

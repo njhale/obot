@@ -890,8 +890,17 @@ export async function acceptMCPCatalogEntryOwnership(
 	};
 }
 
-export async function deleteMCPCatalogEntry(catalogID: string, entryID: string): Promise<void> {
-	await doDelete(`/mcp-catalogs/${catalogID}/entries/${entryID}`);
+export async function deleteMCPCatalogEntry(
+	catalogID: string,
+	entryID: string,
+	opts?: RequestOptions & { force?: boolean }
+): Promise<void> {
+	const { force, ...requestOptions } = opts ?? {};
+	const query = buildQueryString({ force: force ? 'true' : undefined });
+	await doDelete(`/mcp-catalogs/${catalogID}/entries/${entryID}${query ? `?${query}` : ''}`, {
+		...requestOptions,
+		responseHandler: mcpServerDeleteResponseHandler
+	});
 }
 
 export async function getMCPCatalogEntryOAuthCredentials(
@@ -926,22 +935,6 @@ export async function deleteMCPCatalogEntryOAuthCredentials(
 	opts?: { signal?: AbortSignal }
 ): Promise<void> {
 	await doDelete(`/mcp-catalogs/${catalogID}/entries/${entryID}/oauth-credentials`, opts);
-}
-
-export async function refreshCompositeComponents(
-	catalogID: string,
-	entryID: string,
-	opts?: { fetch?: Fetcher }
-): Promise<MCPCatalogEntry> {
-	const response = (await doPost(
-		`/mcp-catalogs/${catalogID}/entries/${entryID}/refresh-components`,
-		{},
-		opts
-	)) as MCPCatalogEntry;
-	return {
-		...response,
-		isCatalogEntry: true
-	};
 }
 
 export async function generateMcpCatalogEntryToolPreviews(

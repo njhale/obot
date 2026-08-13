@@ -99,6 +99,8 @@
 	let confirmBulkDelete = $state(false);
 	let loadingBulkDelete = $state(false);
 	let deleteConflictError = $state<MCPCompositeDeletionDependencyError | undefined>();
+	let forceDeletingEntry = $state<MCPCatalogEntry>();
+	let forceDeleting = $state(false);
 
 	let connectToServerDialog = $state<ReturnType<typeof ConnectToServer>>();
 	let connectUrlDialog = $state<ReturnType<typeof McpConnectUrlDialog>>();
@@ -166,6 +168,10 @@
 
 	async function deleteServerDeployment(server: MCPCatalogServer) {
 		await deleteMcpServerDeployment(server, catalog?.id);
+	}
+
+	function runtimeServerNeedsUpdate(data: MCPCatalogEntry | MCPCatalogServer) {
+		return !('isCatalogEntry' in data) && data.needsUpdate === true;
 	}
 
 	function handleConnectToServer({
@@ -300,7 +306,7 @@
 				}}
 				setRowClasses={(d) => {
 					const missingSecretBinding = 'missingKubernetesSecret' in d && d.missingKubernetesSecret;
-					return (d.data.needsUpdate && !missingSecretBinding) ||
+					return (runtimeServerNeedsUpdate(d.data) && !missingSecretBinding) ||
 						deploymentsNeedingAttentionByCatalogEntry.has(d.data.id)
 						? 'bg-primary/10'
 						: '';
@@ -308,7 +314,7 @@
 			>
 				{#snippet onRenderColumn(property, d)}
 					{@const attentionRequired =
-						(d.data.needsUpdate &&
+						(runtimeServerNeedsUpdate(d.data) &&
 							!('missingKubernetesSecret' in d && d.missingKubernetesSecret)) ||
 						deploymentsNeedingAttentionByCatalogEntry.has(d.data.id)}
 					{@const deprecated = isDeprecatedMCPServer(d.data)}
@@ -505,13 +511,23 @@
 			return;
 		}
 
-		if (deletingEntry.powerUserWorkspaceID) {
-			await UserService.deleteWorkspaceMCPCatalogEntry(
-				deletingEntry.powerUserWorkspaceID,
-				deletingEntry.id
-			);
-		} else if (catalog) {
-			await AdminService.deleteMCPCatalogEntry(catalog.id, deletingEntry.id);
+		try {
+			if (deletingEntry.powerUserWorkspaceID) {
+				await UserService.deleteWorkspaceMCPCatalogEntry(
+					deletingEntry.powerUserWorkspaceID,
+					deletingEntry.id
+				);
+			} else if (catalog) {
+				await AdminService.deleteMCPCatalogEntry(catalog.id, deletingEntry.id);
+			}
+		} catch (error) {
+			if (error instanceof MCPCompositeDeletionDependencyError) {
+				forceDeletingEntry = deletingEntry;
+				deleteConflictError = error;
+				deletingEntry = undefined;
+				return;
+			}
+			throw error;
 		}
 
 		await fetch();
@@ -561,8 +577,10 @@
 	show={confirmBulkDelete}
 	onsuccess={async () => {
 		loadingBulkDelete = true;
+		let currentEntry: MCPCatalogEntry | undefined;
 		try {
 			for (const item of Object.values(selected)) {
+				currentEntry = item.data as MCPCatalogEntry;
 				if (item.data.powerUserWorkspaceID) {
 					await UserService.deleteWorkspaceMCPCatalogEntry(
 						item.data.powerUserWorkspaceID,
@@ -574,6 +592,13 @@
 			}
 
 			await fetch();
+		} catch (error) {
+			if (error instanceof MCPCompositeDeletionDependencyError && currentEntry) {
+				forceDeletingEntry = currentEntry;
+				deleteConflictError = error;
+				return;
+			}
+			throw error;
 		} finally {
 			confirmBulkDelete = false;
 			loadingBulkDelete = false;
@@ -588,8 +613,26 @@
 <McpMultiDeleteBlockedDialog
 	show={!!deleteConflictError}
 	error={deleteConflictError}
+	onForce={forceDeletingEntry && catalog
+		? async () => {
+				if (!forceDeletingEntry || !catalog) return;
+				forceDeleting = true;
+				try {
+					await AdminService.deleteMCPCatalogEntry(catalog.id, forceDeletingEntry.id, {
+						force: true
+					});
+					await fetch();
+					deleteConflictError = undefined;
+					forceDeletingEntry = undefined;
+				} finally {
+					forceDeleting = false;
+				}
+			}
+		: undefined}
+	forceLoading={forceDeleting}
 	onClose={() => {
 		deleteConflictError = undefined;
+		forceDeletingEntry = undefined;
 	}}
 />
 

@@ -22,6 +22,7 @@
 		entity?: 'workspace' | 'catalog';
 		entityId?: string;
 		catalogEntry?: MCPCatalogEntry;
+		mcpServer?: MCPCatalogServer;
 		mcpServerId?: string;
 		mcpServerInstanceId?: string;
 		classes?: {
@@ -32,13 +33,26 @@
 		hideTitle?: boolean;
 	}
 
-	let { name, connectedUsers, classes, entityId, catalogEntry, mcpServerId, hideTitle }: Props =
-		$props();
+	let {
+		name,
+		connectedUsers,
+		classes,
+		entityId,
+		catalogEntry,
+		mcpServer,
+		mcpServerId,
+		hideTitle
+	}: Props = $props();
 	let isAdminUrl = $derived(page.url.pathname.includes('/admin'));
 	let servers = $state<MCPCatalogServer[]>([]);
 	let loadingServers = $state(true);
 	let failedToLoadServers = $state(false);
 	let serversMap = $derived(new Map(servers.map((s) => [s.catalogEntryID || s.id, s])));
+	let componentServers = $derived(
+		mcpServer?.manifest.compositeConfig?.componentServers ??
+			catalogEntry?.manifest.compositeConfig?.componentServers ??
+			[]
+	);
 
 	onMount(async () => {
 		if (!mcpServerId || !catalogEntry?.id || !entityId) {
@@ -74,17 +88,21 @@
 	</div>
 {/if}
 
-{#if catalogEntry?.manifest.compositeConfig?.componentServers}
+{#if componentServers.length > 0}
 	<div>
 		<h2 class="mb-2 text-lg font-semibold">MCP Servers</h2>
 		<div class="flex flex-col gap-2">
-			{#each catalogEntry.manifest.compositeConfig.componentServers as componentServer (componentServer.catalogEntryID || componentServer.mcpServerID)}
+			{#each componentServers as componentServer (componentServer.catalogEntryID || componentServer.mcpServerID)}
+				{@const deployedComponentServer = componentServer.catalogEntryID
+					? serversMap.get(componentServer.catalogEntryID)
+					: undefined}
+				{@const componentManifest = deployedComponentServer?.manifest ?? componentServer.manifest}
 				{@const catalogEntryServerId =
-					componentServer.catalogEntryID && serversMap.get(componentServer.catalogEntryID)?.id}
+					componentServer.catalogEntryID && deployedComponentServer?.id}
 				{@const multiUserServerId = componentServer.mcpServerID}
 				{@const componentServerId = catalogEntryServerId || multiUserServerId}
 				{@const componentExists = !!componentServerId}
-				{@const deprecated = isDeprecatedMCPServer(componentServer)}
+				{@const deprecated = isDeprecatedMCPServer({ manifest: componentManifest })}
 
 				{#if componentExists}
 					<button
@@ -115,17 +133,13 @@
 					>
 						<div class="flex items-center gap-2">
 							<div class="icon">
-								{#if componentServer.manifest?.icon}
-									<img
-										src={componentServer.manifest?.icon}
-										alt={componentServer.manifest?.name}
-										class="size-6"
-									/>
+								{#if componentManifest?.icon}
+									<img src={componentManifest.icon} alt={componentManifest.name} class="size-6" />
 								{:else}
 									<Server class="size-6" />
 								{/if}
 							</div>
-							<p class="text-sm">{componentServer.manifest?.name}</p>
+							<p class="text-sm">{componentManifest?.name}</p>
 							<McpDeprecatedNotice {deprecated} child />
 							{#if componentServerId}
 								<span class="text-muted-content text-sm">({componentServerId})</span>
@@ -141,17 +155,13 @@
 					>
 						<div class="flex items-center gap-2">
 							<div class="icon">
-								{#if componentServer.manifest?.icon}
-									<img
-										src={componentServer.manifest?.icon}
-										alt={componentServer.manifest?.name}
-										class="size-6"
-									/>
+								{#if componentManifest?.icon}
+									<img src={componentManifest.icon} alt={componentManifest.name} class="size-6" />
 								{:else}
 									<Server class="size-6" />
 								{/if}
 							</div>
-							<p class="text-sm">{componentServer.manifest?.name}</p>
+							<p class="text-sm">{componentManifest?.name}</p>
 							<McpDeprecatedNotice {deprecated} child />
 							{#if loadingServers}
 								<span class="text-muted-content text-xs">Loading...</span>

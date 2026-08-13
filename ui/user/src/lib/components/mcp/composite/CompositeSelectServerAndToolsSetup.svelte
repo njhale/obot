@@ -9,7 +9,6 @@
 		type CatalogComponentServer,
 		type CompositeServerToolRow,
 		type MCPCatalogEntry,
-		type MCPCatalogEntryServerManifest,
 		type MCPCatalogServer
 	} from '$lib/services';
 	import {
@@ -114,17 +113,6 @@
 		error = undefined;
 	}
 
-	function componentManifest(
-		entry: MCPCatalogEntry | MCPCatalogServer
-	): MCPCatalogEntryServerManifest {
-		return 'isCatalogEntry' in entry
-			? entry.manifest
-			: ({
-					...entry.manifest,
-					serverUserType: entry.serverUserType
-				} as unknown as MCPCatalogEntryServerManifest);
-	}
-
 	export function open() {
 		resetConfigureTool();
 		if (presetConfiguringEntry) {
@@ -133,13 +121,11 @@
 				'isCatalogEntry' in configuringEntry
 					? {
 							catalogEntryID: configuringEntry.id,
-							manifest: componentManifest(configuringEntry),
 							toolOverrides: [],
 							toolPrefix: existingToolPrefix
 						}
 					: {
 							mcpServerID: configuringEntry.id,
-							manifest: componentManifest(configuringEntry),
 							toolOverrides: [],
 							toolPrefix: existingToolPrefix
 						};
@@ -327,13 +313,11 @@
 			'isCatalogEntry' in configuringEntry
 				? {
 						catalogEntryID: configuringEntry.id,
-						manifest: componentManifest(configuringEntry),
 						toolOverrides: [],
 						toolPrefix: defaultPrefix
 					}
 				: {
 						mcpServerID: configuringEntry.id,
-						manifest: componentManifest(configuringEntry),
 						toolOverrides: [],
 						toolPrefix: defaultPrefix
 					};

@@ -709,6 +709,7 @@ export interface CompositeCatalogConfig {
 export interface CatalogComponentServer {
 	catalogEntryID?: string;
 	mcpServerID?: string;
+	// Resolved live by the API for responses. Ignored on input and never persisted.
 	manifest?: MCPCatalogEntryServerManifest;
 	toolOverrides?: ToolOverride[];
 	toolPrefix?: string;
@@ -757,13 +758,13 @@ export interface MCPCatalogEntry {
 	connectURL?: string;
 }
 
-// Matches the backend compositeDeletionDependency struct used when preventing
-// deletion of multi-user MCP servers that are still referenced by composites.
+// Describes catalog and runtime composites affected by deleting a source.
 export interface MCPCompositeDeletionDependency {
 	name: string;
-	icon: string;
+	icon?: string;
 	mcpServerID?: string;
 	catalogEntryID: string;
+	willBeDeleted?: boolean;
 }
 export type MCPCatalogEntryFormData = Omit<MCPCatalogEntryServerManifest, 'metadata'> & {
 	categories: string[];

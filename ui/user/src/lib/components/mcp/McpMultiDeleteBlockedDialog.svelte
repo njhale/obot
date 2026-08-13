@@ -11,9 +11,11 @@
 		show: boolean;
 		error?: MCPCompositeDeletionDependencyError;
 		onClose: () => void;
+		onForce?: () => void | Promise<void>;
+		forceLoading?: boolean;
 	}
 
-	let { show, error, onClose }: Props = $props();
+	let { show, error, onClose, onForce, forceLoading = false }: Props = $props();
 
 	let dialog = $state<ReturnType<typeof ResponsiveDialog>>();
 
@@ -21,18 +23,27 @@
 		const deps: MCPCompositeDeletionDependency[] = error?.dependencies ?? [];
 
 		// eslint-disable-next-line svelte/prefer-svelte-reactivity
-		const grouped = new Map<string, { name: string; icon?: string; hasConfigDep: boolean }>();
+		const grouped = new Map<
+			string,
+			{ name: string; icon?: string; hasConfigDep: boolean; willBeDeleted: boolean }
+		>();
 
 		for (const dep of deps) {
 			const id = dep.catalogEntryID;
 			let g = grouped.get(id);
 			if (!g) {
-				g = { name: dep.name, icon: dep.icon, hasConfigDep: false };
+				g = {
+					name: dep.name,
+					icon: dep.icon,
+					hasConfigDep: false,
+					willBeDeleted: false
+				};
 				grouped.set(id, g);
 			}
 			if (!dep.mcpServerID) {
 				g.hasConfigDep = true;
 			}
+			g.willBeDeleted ||= dep.willBeDeleted === true;
 		}
 
 		return (
@@ -46,7 +57,14 @@
 
 					const label = hasConfigDep ? 'Edit Configuration' : 'Update Instances';
 
-					return { catalogEntryID, name: g.name, icon: g.icon, url, label };
+					return {
+						catalogEntryID,
+						name: g.name,
+						icon: g.icon,
+						url,
+						label,
+						willBeDeleted: g.willBeDeleted
+					};
 				})
 				// Show Edit Configuration links first, then Upgrade Instances
 				.sort((a, b) => {
@@ -66,7 +84,12 @@
 	});
 </script>
 
-<ResponsiveDialog bind:this={dialog} {onClose} onClickOutside={onClose} class="md:max-w-xl">
+<ResponsiveDialog
+	bind:this={dialog}
+	{onClose}
+	onClickOutside={forceLoading ? undefined : onClose}
+	class="md:max-w-xl"
+>
 	<div class="default-scrollbar-thin flex flex-col gap-4 overflow-y-auto p-4">
 		<div class="notification-alert mb-2 flex flex-col gap-2">
 			<div class="flex gap-2">
@@ -74,8 +97,14 @@
 				<p class="my-0.5 flex flex-col text-sm font-semibold">Action Required</p>
 			</div>
 			<span class="text-left text-sm font-light wrap-break-word">
-				To delete this server, please remove it from the servers below and update all deployed
-				instances.
+				{#if onForce}
+					Deleting this source will remove it from the composites below. A composite with no
+					remaining components will also be deleted. Runtime composites whose catalog entry remains
+					keep their snapshots until upgraded; runtimes for a deleted composite are removed with it.
+				{:else}
+					To delete this server, please remove it from the servers below and update all deployed
+					instances.
+				{/if}
 			</span>
 		</div>
 
@@ -94,6 +123,9 @@
 							<span class="truncate font-medium text-gray-900 dark:text-gray-100">
 								{dep.name}
 							</span>
+							{#if dep.willBeDeleted}
+								<span class="badge badge-error badge-sm">Will be deleted</span>
+							{/if}
 						</div>
 						<a
 							href={resolve(dep.url as `/${string}`)}
@@ -104,6 +136,15 @@
 					</li>
 				{/each}
 			</ul>
+		{/if}
+
+		{#if onForce}
+			<div class="flex justify-end gap-2 border-t border-base-300 pt-4">
+				<button class="btn btn-secondary" disabled={forceLoading} onclick={onClose}>Cancel</button>
+				<button class="btn btn-error" disabled={forceLoading} onclick={onForce}>
+					{forceLoading ? 'Deleting...' : 'Delete Anyway'}
+				</button>
+			</div>
 		{/if}
 	</div>
 </ResponsiveDialog>

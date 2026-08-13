@@ -106,6 +106,7 @@
 				entity="catalog"
 				entityId={DEFAULT_MCP_CATALOG_ID}
 				{catalogEntry}
+				mcpServer={server}
 				connectedUsers={[]}
 			/>
 		{:else if supportsDetails && mcpServerId}

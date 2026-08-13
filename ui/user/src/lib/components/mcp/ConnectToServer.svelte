@@ -340,7 +340,11 @@
 			> = {};
 			for (const c of components) {
 				const id = c.catalogEntryID || c.mcpServerID;
-				if (!id || !c.manifest) continue;
+				if (!id || !c.manifest) {
+					launchError = 'A composite component could not be resolved. Refresh and try again.';
+					configureForm = undefined;
+					return;
+				}
 				const m = c.manifest;
 				const isMultiUser = !!c.mcpServerID && !c.catalogEntryID;
 				componentConfigs[id] = {

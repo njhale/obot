@@ -143,6 +143,7 @@
 
 	let deleteServer = $state(false);
 	let deleteConflictError = $state<MCPCompositeDeletionDependencyError | undefined>();
+	let forceDeletingEntry = $state(false);
 	let deleteResourceFromRule = $state<{
 		rule: AccessControlRule;
 		resourceId: string;
@@ -1374,7 +1375,16 @@
 				entity === 'workspace'
 					? UserService.deleteWorkspaceMCPCatalogEntry
 					: AdminService.deleteMCPCatalogEntry;
-			await deleteCatalogEntryFn(id, entry.id);
+			try {
+				await deleteCatalogEntryFn(id, entry.id);
+			} catch (error) {
+				if (error instanceof MCPCompositeDeletionDependencyError) {
+					deleteConflictError = error;
+					deleteServer = false;
+					return;
+				}
+				throw error;
+			}
 			goto(url);
 		}
 	}}
@@ -1384,6 +1394,20 @@
 <McpMultiDeleteBlockedDialog
 	show={!!deleteConflictError}
 	error={deleteConflictError}
+	onForce={entry && 'isCatalogEntry' in entry && entity === 'catalog' && id
+		? async () => {
+				if (!entry || !('isCatalogEntry' in entry) || !id) return;
+				forceDeletingEntry = true;
+				try {
+					await AdminService.deleteMCPCatalogEntry(id, entry.id, { force: true });
+					deleteConflictError = undefined;
+					goto(`${prefix}/mcp-catalog` as `/${string}`);
+				} finally {
+					forceDeletingEntry = false;
+				}
+			}
+		: undefined}
+	forceLoading={forceDeletingEntry}
 	onClose={() => {
 		deleteConflictError = undefined;
 	}}
