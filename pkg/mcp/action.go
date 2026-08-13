@@ -141,6 +141,15 @@ func (sm *SessionManager) serverOrInstanceFromConnectURL(ctx context.Context, id
 		if err := sm.storageClient.Get(ctx, kclient.ObjectKey{Namespace: system.DefaultNamespace, Name: id}, &entry); err != nil {
 			return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrNotFound("catalog entry %s not found", id)
 		}
+		if entry.Spec.Manifest.Runtime == types.RuntimeComposite &&
+			(entry.Spec.MCPCatalogName != system.DefaultCatalog || entry.Spec.PowerUserWorkspaceID != "") {
+			return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrBadRequest("composite catalog entry %s does not belong to the default catalog", id)
+		}
+		resolvedSources, err := NewCompositeCatalogResolver(sm.storageClient).ResolveDetailed(ctx, entry.Spec.Manifest)
+		if err != nil {
+			return v1.MCPServer{}, v1.MCPServerInstance{}, fmt.Errorf("resolve catalog entry %s: %w", id, err)
+		}
+		entry.Spec.Manifest = resolvedSources.Manifest
 		addExtractedEnvVarsToCatalogEntry(&entry)
 
 		var servers v1.MCPServerList
@@ -156,7 +165,7 @@ func (sm *SessionManager) serverOrInstanceFromConnectURL(ctx context.Context, id
 			return v1.MCPServer{}, v1.MCPServerInstance{}, err
 		}
 		if len(servers.Items) == 0 {
-			missingAdminConfig, err := sm.entryMissingAdminConfig(ctx, entry)
+			missingAdminConfig, err := sm.entryMissingAdminConfig(ctx, entry, resolvedSources.MissingStaticOAuthCredentials())
 			if err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, fmt.Errorf("failed to determine required admin configuration for catalog entry %s: %w", id, err)
 			}
@@ -571,9 +580,9 @@ func (m missingCatalogEntryAdminConfig) err(entryID string) error {
 	return types.NewErrBadRequest("catalog entry %s cannot be connected because %s", entryID, strings.Join(parts, "; "))
 }
 
-func (sm *SessionManager) entryMissingAdminConfig(ctx context.Context, entry v1.MCPServerCatalogEntry) (missingCatalogEntryAdminConfig, error) {
+func (sm *SessionManager) entryMissingAdminConfig(ctx context.Context, entry v1.MCPServerCatalogEntry, sourceStaticOAuthMissing bool) (missingCatalogEntryAdminConfig, error) {
 	missing := missingCatalogEntryAdminConfig{
-		StaticOAuth: entryRequiresStaticOAuthCreds(entry),
+		StaticOAuth: entryRequiresStaticOAuthCreds(entry) || sourceStaticOAuthMissing,
 	}
 
 	type manifestRef struct {

@@ -1291,6 +1291,13 @@ func newFakeClient(t *testing.T, objects ...kclient.Object) kclient.WithWatch {
 	return fake.NewClientBuilder().
 		WithScheme(storagescheme.Scheme).
 		WithStatusSubresource(&v1.MCPServer{}).
+		WithIndex(&v1.MCPServer{}, "spec.compositeName", func(obj kclient.Object) []string {
+			server := obj.(*v1.MCPServer)
+			if server.Spec.CompositeName == "" {
+				return nil
+			}
+			return []string{server.Spec.CompositeName}
+		}).
 		WithIndex(&v1.MCPNetworkPolicy{}, "spec.mcpServerName", func(obj kclient.Object) []string {
 			policy := obj.(*v1.MCPNetworkPolicy)
 			if policy.Spec.MCPServerName == "" {
@@ -1508,6 +1515,157 @@ func TestDetectDriftReturnsConfigurationComparisonError(t *testing.T) {
 		Name:      server.Name,
 	}, &router.ResponseWrapper{})
 	require.EqualError(t, err, "unknown runtime type: invalid")
+}
+
+func TestDetectDriftMarksOwnedCompositeComponentNeedingUpdate(t *testing.T) {
+	source := newMCPServerCatalogEntry("component-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Component",
+		Runtime:        types.RuntimeNPX,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "component@2"},
+	})
+	child := newMCPServer("component-server")
+	child.Spec.CompositeName = "composite-server"
+	child.Spec.MCPServerCatalogEntryName = source.Name
+	child.Spec.Manifest = types.MCPServerManifest{
+		Name:      "Component",
+		Runtime:   types.RuntimeNPX,
+		NPXConfig: &types.NPXRuntimeConfig{Package: "component@1"},
+	}
+	client := newFakeClient(t, source, child)
+
+	err := (&Handler{}).DetectDrift(router.Request{
+		Client: client, Ctx: t.Context(), Object: child,
+		Namespace: child.Namespace, Name: child.Name,
+	}, &router.ResponseWrapper{})
+
+	require.NoError(t, err)
+	var updated v1.MCPServer
+	require.NoError(t, client.Get(t.Context(), router.Key(child.Namespace, child.Name), &updated))
+	assert.True(t, updated.Status.NeedsUpdate)
+}
+
+func TestDetectDriftAggregatesOwnedComponentDriftOntoComposite(t *testing.T) {
+	source := newMCPServerCatalogEntry("component-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Component",
+		Runtime:        types.RuntimeNPX,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "component@2"},
+	})
+	compositeEntry := newMCPServerCatalogEntry("composite-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Composite",
+		Runtime:        types.RuntimeComposite,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+			{CatalogEntryID: source.Name, ToolPrefix: "component_"},
+		}},
+	})
+	parent := newMCPServer("composite-server")
+	parent.Spec.MCPServerCatalogEntryName = compositeEntry.Name
+	parent.Spec.Manifest = types.MCPServerManifest{
+		Name:    "Composite",
+		Runtime: types.RuntimeComposite,
+		CompositeConfig: &types.CompositeRuntimeConfig{ComponentServers: []types.ComponentServer{
+			{
+				CatalogEntryID: source.Name,
+				ToolPrefix:     "component_",
+				Manifest: types.MCPServerManifest{
+					Name:      "Component",
+					Runtime:   types.RuntimeNPX,
+					NPXConfig: &types.NPXRuntimeConfig{Package: "component@1"},
+				},
+			},
+		}},
+	}
+	child := newMCPServer("component-server")
+	child.Spec.CompositeName = parent.Name
+	child.Spec.MCPServerCatalogEntryName = source.Name
+	child.Spec.Manifest = *parent.Spec.Manifest.CompositeConfig.ComponentServers[0].Manifest.DeepCopy()
+	client := newFakeClient(t, source, compositeEntry, parent, child)
+
+	err := (&Handler{}).DetectDrift(router.Request{
+		Client: client, Ctx: t.Context(), Object: parent,
+		Namespace: parent.Namespace, Name: parent.Name,
+	}, &router.ResponseWrapper{})
+
+	require.NoError(t, err)
+	var updated v1.MCPServer
+	require.NoError(t, client.Get(t.Context(), router.Key(parent.Namespace, parent.Name), &updated))
+	assert.True(t, updated.Status.NeedsUpdate)
+}
+
+func TestCompositePolicyDriftIgnoresRuntimeComponentSnapshot(t *testing.T) {
+	serverManifest := types.MCPServerManifest{
+		Runtime: types.RuntimeComposite,
+		CompositeConfig: &types.CompositeRuntimeConfig{ComponentServers: []types.ComponentServer{
+			{
+				CatalogEntryID: "component-entry",
+				ToolPrefix:     "component_",
+				Manifest: types.MCPServerManifest{
+					Runtime:   types.RuntimeNPX,
+					NPXConfig: &types.NPXRuntimeConfig{Package: "component@1"},
+				},
+			},
+		}},
+	}
+	entryManifest := types.MCPServerCatalogEntryManifest{
+		Runtime: types.RuntimeComposite,
+		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+			{CatalogEntryID: "component-entry", ToolPrefix: "component_"},
+		}},
+	}
+
+	drifted, err := configurationHasDrifted(serverManifest, entryManifest, false)
+
+	require.NoError(t, err)
+	assert.False(t, drifted)
+}
+
+func TestDetectDriftRefreshesMultiUserProxyWithoutOwningServer(t *testing.T) {
+	shared := newMCPServer("shared-server")
+	shared.Spec.MCPCatalogID = "default"
+	shared.Spec.Manifest = types.MCPServerManifest{
+		Name:      "Shared",
+		Runtime:   types.RuntimeNPX,
+		NPXConfig: &types.NPXRuntimeConfig{Package: "shared@2"},
+	}
+	compositeEntry := newMCPServerCatalogEntry("composite-entry", types.MCPServerCatalogEntryManifest{
+		Name:           "Composite",
+		Runtime:        types.RuntimeComposite,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+			{MCPServerID: shared.Name},
+		}},
+	})
+	parent := newMCPServer("composite-server")
+	parent.Spec.MCPServerCatalogEntryName = compositeEntry.Name
+	parent.Spec.Manifest = types.MCPServerManifest{
+		Name:    "Composite",
+		Runtime: types.RuntimeComposite,
+		CompositeConfig: &types.CompositeRuntimeConfig{ComponentServers: []types.ComponentServer{
+			{
+				MCPServerID: shared.Name,
+				Manifest: types.MCPServerManifest{
+					Name:      "Shared",
+					Runtime:   types.RuntimeNPX,
+					NPXConfig: &types.NPXRuntimeConfig{Package: "shared@1"},
+				},
+			},
+		}},
+	}
+	client := newFakeClient(t, shared, compositeEntry, parent)
+
+	err := (&Handler{}).DetectDrift(router.Request{
+		Client: client, Ctx: t.Context(), Object: parent,
+		Namespace: parent.Namespace, Name: parent.Name,
+	}, &router.ResponseWrapper{})
+
+	require.NoError(t, err)
+	var updatedParent, unchangedShared v1.MCPServer
+	require.NoError(t, client.Get(t.Context(), router.Key(parent.Namespace, parent.Name), &updatedParent))
+	require.NoError(t, client.Get(t.Context(), router.Key(shared.Namespace, shared.Name), &unchangedShared))
+	assert.True(t, updatedParent.Status.NeedsUpdate)
+	assert.Equal(t, "shared@2", unchangedShared.Spec.Manifest.NPXConfig.Package)
 }
 
 func newMCPServerCatalogEntry(name string, manifest types.MCPServerCatalogEntryManifest) *v1.MCPServerCatalogEntry {

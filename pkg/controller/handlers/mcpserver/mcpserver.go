@@ -76,7 +76,7 @@ func New(gatewayClient *gateway.Client, mcpSessionManager *mcp.SessionManager, t
 func (h *Handler) DetectDrift(req router.Request, _ router.Response) error {
 	server := req.Object.(*v1.MCPServer)
 
-	if server.Spec.MCPServerCatalogEntryName == "" || server.Spec.CompositeName != "" {
+	if server.Spec.MCPServerCatalogEntryName == "" {
 		return nil
 	}
 
@@ -90,6 +90,12 @@ func (h *Handler) DetectDrift(req router.Request, _ router.Response) error {
 	drifted, err := ConfigurationHasDrifted(req.Ctx, h.gatewayClient, server, entry.Spec.Manifest, h.defaultDenyAllEgress)
 	if err != nil {
 		return err
+	}
+	if !drifted && server.Spec.Manifest.Runtime == types.RuntimeComposite {
+		drifted, err = h.compositeComponentsHaveDrifted(req, server, entry.Spec.Manifest.CompositeConfig)
+		if err != nil {
+			return err
+		}
 	}
 
 	if server.Status.NeedsUpdate != drifted {
@@ -341,7 +347,7 @@ func configurationHasDrifted(serverManifest types.MCPServerManifest, entryManife
 		drifted = remoteConfigHasDrifted(serverManifest.RemoteConfig, entryManifest.RemoteConfig)
 	case types.RuntimeComposite:
 		var err error
-		drifted, err = compositeConfigHasDrifted(serverManifest.CompositeConfig, entryManifest.CompositeConfig, defaultDenyAllEgress)
+		drifted, err = compositeConfigHasDrifted(serverManifest.CompositeConfig, entryManifest.CompositeConfig)
 		if err != nil {
 			return false, err
 		}
@@ -571,8 +577,9 @@ func adminAddedSecretBinding(binding *types.MCPSecretBinding) bool {
 	return binding != nil && binding.AdminAdded
 }
 
-// compositeConfigHasDrifted checks if the composite configuration has drifted
-func compositeConfigHasDrifted(serverConfig *types.CompositeRuntimeConfig, entryConfig *types.CompositeCatalogConfig, defaultDenyAllEgress bool) (bool, error) {
+// compositeConfigHasDrifted compares only membership and composition policy.
+// Source-manifest drift is checked against the owned runtime components.
+func compositeConfigHasDrifted(serverConfig *types.CompositeRuntimeConfig, entryConfig *types.CompositeCatalogConfig) (bool, error) {
 	if serverConfig == nil && entryConfig == nil {
 		return false, nil
 	}
@@ -608,14 +615,74 @@ func compositeConfigHasDrifted(serverConfig *types.CompositeRuntimeConfig, entry
 			return true, nil
 		}
 
-		// Compare manifests
-		drifted, err := configurationHasDrifted(serverComponent.Manifest, entryComponent.Manifest, defaultDenyAllEgress)
+	}
+
+	return false, nil
+}
+
+func (h *Handler) compositeComponentsHaveDrifted(req router.Request, parent *v1.MCPServer, entryConfig *types.CompositeCatalogConfig) (bool, error) {
+	if entryConfig == nil || parent.Spec.Manifest.CompositeConfig == nil {
+		return entryConfig != nil || parent.Spec.Manifest.CompositeConfig != nil, nil
+	}
+
+	var children v1.MCPServerList
+	if err := req.List(&children, &kclient.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("spec.compositeName", parent.Name),
+		Namespace:     parent.Namespace,
+	}); err != nil {
+		return false, fmt.Errorf("list composite component servers: %w", err)
+	}
+
+	childrenBySource := make(map[string]v1.MCPServer, len(children.Items))
+	for _, child := range children.Items {
+		if child.Spec.MCPServerCatalogEntryName != "" {
+			childrenBySource[child.Spec.MCPServerCatalogEntryName] = child
+		}
+	}
+	runtimeBySource := make(map[string]types.ComponentServer, len(parent.Spec.Manifest.CompositeConfig.ComponentServers))
+	for _, component := range parent.Spec.Manifest.CompositeConfig.ComponentServers {
+		runtimeBySource[component.ComponentID()] = component
+	}
+
+	expectedOwnedChildren := 0
+	for _, component := range entryConfig.ComponentServers {
+		runtimeComponent, ok := runtimeBySource[component.ComponentID()]
+		if !ok {
+			return true, nil
+		}
+
+		if component.MCPServerID != "" {
+			var server v1.MCPServer
+			if err := req.Get(&server, parent.Namespace, component.MCPServerID); apierrors.IsNotFound(err) {
+				return true, nil
+			} else if err != nil {
+				return false, err
+			}
+			drifted, err := configurationHasDrifted(runtimeComponent.Manifest, server.Spec.Manifest.ConvertToCatalogEntry(), h.defaultDenyAllEgress)
+			if err != nil || drifted {
+				return drifted, err
+			}
+			continue
+		}
+
+		expectedOwnedChildren++
+		child, ok := childrenBySource[component.CatalogEntryID]
+		if !ok {
+			return true, nil
+		}
+		var source v1.MCPServerCatalogEntry
+		if err := req.Get(&source, parent.Namespace, component.CatalogEntryID); apierrors.IsNotFound(err) {
+			return true, nil
+		} else if err != nil {
+			return false, err
+		}
+		drifted, err := ConfigurationHasDrifted(req.Ctx, h.gatewayClient, &child, source.Spec.Manifest, h.defaultDenyAllEgress)
 		if err != nil || drifted {
 			return drifted, err
 		}
 	}
 
-	return false, nil
+	return len(childrenBySource) != expectedOwnedChildren, nil
 }
 
 // EnsureMCPServerInstanceUserCount ensures that mcp server instance user count for multi-user MCP servers is up to date.
@@ -882,8 +949,8 @@ func (h *Handler) EnsureCompositeComponents(req router.Request, _ router.Respons
 	// withNeedsURL returns the given MCP server with a NeedsURL field set according to its hostname constraint and url.
 	// If the server is not remote, or does not have a hostname constraint, it returns the unmodified server.
 	withNeedsURL := func(server v1.MCPServer) v1.MCPServer {
-		remoteConfig := compositeServer.Spec.Manifest.RemoteConfig
-		if compositeServer.Spec.Manifest.Runtime != types.RuntimeRemote || remoteConfig == nil || remoteConfig.Hostname == "" {
+		remoteConfig := server.Spec.Manifest.RemoteConfig
+		if server.Spec.Manifest.Runtime != types.RuntimeRemote || remoteConfig == nil || remoteConfig.Hostname == "" {
 			return server
 		}
 

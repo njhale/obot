@@ -1077,6 +1077,10 @@ func mcpServerOrInstanceFromConnectURL(req api.Context, id, secretBindingAllowed
 		if err := req.Get(&entry, id); err != nil {
 			return v1.MCPServer{}, v1.MCPServerInstance{}, types.NewErrNotFound("catalog entry %s not found", id)
 		}
+		entry, resolvedSources, err := resolveCompositeCatalogEntry(req.Context(), req.Storage, entry)
+		if err != nil {
+			return v1.MCPServer{}, v1.MCPServerInstance{}, err
+		}
 		addExtractedEnvVarsToCatalogEntry(&entry)
 
 		// List the MCP servers for the user and take the first one.
@@ -1097,6 +1101,7 @@ func mcpServerOrInstanceFromConnectURL(req api.Context, id, secretBindingAllowed
 			if err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, fmt.Errorf("failed to determine required admin configuration for catalog entry %s: %w", id, err)
 			}
+			missingAdminConfig.StaticOAuth = missingAdminConfig.StaticOAuth || resolvedSources.MissingStaticOAuthCredentials()
 			if err := missingAdminConfig.err(id); err != nil {
 				return v1.MCPServer{}, v1.MCPServerInstance{}, err
 			}
@@ -1653,6 +1658,10 @@ func (m *MCPHandler) CreateServer(req api.Context) error {
 		if err := req.Get(&catalogEntry, input.CatalogEntryID); err != nil {
 			return err
 		}
+		catalogEntry, resolvedSources, err := resolveCompositeCatalogEntry(req.Context(), req.Storage, catalogEntry)
+		if err != nil {
+			return err
+		}
 		sourceCatalogEntryManifest = catalogEntry.Spec.Manifest.DeepCopy()
 
 		// Validate that the catalog entry type is compatible with the route used.
@@ -1691,7 +1700,7 @@ func (m *MCPHandler) CreateServer(req api.Context) error {
 		}
 
 		// Block server creation if OAuth is required but not configured
-		if entryRequiresStaticOAuthCreds(catalogEntry) {
+		if entryRequiresStaticOAuthCreds(catalogEntry) || resolvedSources.MissingStaticOAuthCredentials() {
 			return types.NewErrBadRequest("catalog entry requires OAuth configuration by an administrator before it can be used")
 		}
 
@@ -4120,6 +4129,10 @@ func (m *MCPHandler) triggerCompositeUpdate(req api.Context, compositeServer v1.
 	// Capture the hash of the initial server so we can compare changes on update.
 	// This will let us abort an update if the server's manifest has changed before the update was applied.
 	oldManifestHash := utils.Digest(compositeServer.Spec.Manifest)
+	entry, _, err := resolveCompositeCatalogEntry(req.Context(), req.Storage, entry)
+	if err != nil {
+		return err
+	}
 
 	// Build fresh manifest with user URLs applied
 	updatedManifest, err := serverManifestFromCatalogEntryManifest(

@@ -29,10 +29,5 @@ func resolveCompositeCatalogEntry(ctx context.Context, reader kclient.Reader, en
 }
 
 func resolvedSourcesRequireStaticOAuth(resolved mcp.ResolvedCatalogManifest) bool {
-	for _, entry := range resolved.CatalogEntries {
-		if entryRequiresStaticOAuthCreds(entry) {
-			return true
-		}
-	}
-	return false
+	return resolved.MissingStaticOAuthCredentials()
 }

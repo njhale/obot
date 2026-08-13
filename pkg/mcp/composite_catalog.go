@@ -20,6 +20,20 @@ type ResolvedCatalogManifest struct {
 	MCPServers     map[string]v1.MCPServer
 }
 
+// MissingStaticOAuthCredentials reports whether any resolved catalog-entry
+// source requires static OAuth but has not been configured. Credential values
+// remain owned by the source entry and are never loaded by the resolver.
+func (r ResolvedCatalogManifest) MissingStaticOAuthCredentials() bool {
+	for _, entry := range r.CatalogEntries {
+		if entry.Spec.Manifest.RemoteConfig != nil &&
+			entry.Spec.Manifest.RemoteConfig.StaticOAuthRequired &&
+			!entry.Status.OAuthCredentialConfigured {
+			return true
+		}
+	}
+	return false
+}
+
 // CompositeCatalogResolver resolves refs-only composite catalog manifests.
 // Composites are supported only in the default catalog.
 type CompositeCatalogResolver struct {
