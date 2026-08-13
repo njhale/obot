@@ -185,6 +185,8 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/obot-platform/obot/apiclient/types.MCPCatalog":                                schema_obot_platform_obot_apiclient_types_MCPCatalog(ref),
 		"github.com/obot-platform/obot/apiclient/types.MCPCatalogList":                            schema_obot_platform_obot_apiclient_types_MCPCatalogList(ref),
 		"github.com/obot-platform/obot/apiclient/types.MCPCatalogManifest":                        schema_obot_platform_obot_apiclient_types_MCPCatalogManifest(ref),
+		"github.com/obot-platform/obot/apiclient/types.MCPCompositeDeletionConflict":              schema_obot_platform_obot_apiclient_types_MCPCompositeDeletionConflict(ref),
+		"github.com/obot-platform/obot/apiclient/types.MCPCompositeDeletionDependency":            schema_obot_platform_obot_apiclient_types_MCPCompositeDeletionDependency(ref),
 		"github.com/obot-platform/obot/apiclient/types.MCPEnv":                                    schema_obot_platform_obot_apiclient_types_MCPEnv(ref),
 		"github.com/obot-platform/obot/apiclient/types.MCPHeader":                                 schema_obot_platform_obot_apiclient_types_MCPHeader(ref),
 		"github.com/obot-platform/obot/apiclient/types.MCPPromptReadStats":                        schema_obot_platform_obot_apiclient_types_MCPPromptReadStats(ref),
@@ -2881,7 +2883,7 @@ func schema_obot_platform_obot_apiclient_types_CatalogComponentServer(ref common
 					},
 					"manifest": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Manifest is the catalog entry manifest of the component server",
+							Description: "Manifest is resolved from CatalogEntryID or MCPServerID for API responses. Deprecated: ignored on input and never persisted.",
 							Default:     map[string]interface{}{},
 							Ref:         ref("github.com/obot-platform/obot/apiclient/types.MCPServerCatalogEntryManifest"),
 						},
@@ -9692,6 +9694,86 @@ func schema_obot_platform_obot_apiclient_types_MCPCatalogManifest(ref common.Ref
 					},
 				},
 				Required: []string{"displayName", "sourceURLs"},
+			},
+		},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_MCPCompositeDeletionConflict(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"message": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"dependencies": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref("github.com/obot-platform/obot/apiclient/types.MCPCompositeDeletionDependency"),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"message", "dependencies"},
+			},
+		},
+		Dependencies: []string{
+			"github.com/obot-platform/obot/apiclient/types.MCPCompositeDeletionDependency"},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_MCPCompositeDeletionDependency(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "MCPCompositeDeletionDependency describes a catalog or runtime composite affected by deleting one of its sources.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"icon": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"mcpServerID": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"catalogEntryID": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"willBeDeleted": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"boolean"},
+							Format: "",
+						},
+					},
+				},
+				Required: []string{"name", "catalogEntryID"},
 			},
 		},
 	}
@@ -21639,7 +21721,7 @@ func schema_storage_apis_obotobotai_v1_MCPServerCatalogEntryStatus(ref common.Re
 					},
 					"needsUpdate": {
 						SchemaProps: spec.SchemaProps{
-							Description: "NeedsUpdate indicates whether this composite catalog entry's component snapshots have drifted from their sources.",
+							Description: "NeedsUpdate is retained for backward-compatible API decoding. Catalog composites no longer snapshot source manifests, so controllers clear it.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
