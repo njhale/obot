@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"slices"
 	"sort"
@@ -532,12 +533,82 @@ func (h *MCPCatalogHandler) DeleteEntry(req api.Context) error {
 	if !entry.Spec.Editable {
 		return types.NewErrBadRequest("entry is not editable and cannot be manually deleted")
 	}
+	dependencies, err := listCatalogEntryDeletionDependencies(req, entry.Name)
+	if err != nil {
+		return fmt.Errorf("failed to list composite deletion dependencies: %w", err)
+	}
+	force := req.URL.Query().Get("force") == "true"
+	if len(dependencies) > 0 && !force {
+		return req.WriteCode(types.MCPCompositeDeletionConflict{
+			Message:      "MCP catalog entry is used by composite catalog entries",
+			Dependencies: dependencies,
+		}, http.StatusConflict)
+	}
+	if force {
+		if err := mcp.RemoveCatalogEntryFromComposites(req.Context(), req.Storage, entry.Name); err != nil {
+			return err
+		}
+	}
 
 	if err := req.Delete(&entry); err != nil {
 		return fmt.Errorf("failed to delete entry: %w", err)
 	}
 
 	return nil
+}
+
+func listCatalogEntryDeletionDependencies(req api.Context, sourceName string) ([]types.MCPCompositeDeletionDependency, error) {
+	references, err := mcp.ListCompositeCatalogReferences(req.Context(), req.Storage, sourceName)
+	if err != nil {
+		return nil, err
+	}
+
+	willDelete := make(map[string]bool, len(references))
+	dependencies := make([]types.MCPCompositeDeletionDependency, 0, len(references))
+	for _, reference := range references {
+		willDelete[reference.Entry.Name] = reference.WillBeDeleted
+		dependencies = append(dependencies, types.MCPCompositeDeletionDependency{
+			Name:           reference.Entry.Spec.Manifest.Name,
+			Icon:           reference.Entry.Spec.Manifest.Icon,
+			CatalogEntryID: reference.Entry.Name,
+			WillBeDeleted:  reference.WillBeDeleted,
+		})
+	}
+
+	var runtimeComposites v1.MCPServerList
+	if err := req.List(&runtimeComposites, client.InNamespace(system.DefaultNamespace)); err != nil {
+		return nil, fmt.Errorf("list runtime composites: %w", err)
+	}
+	for _, runtimeComposite := range runtimeComposites.Items {
+		if runtimeComposite.Spec.Manifest.Runtime != types.RuntimeComposite {
+			continue
+		}
+		config := runtimeComposite.Spec.Manifest.CompositeConfig
+		if config == nil {
+			continue
+		}
+		for _, component := range config.ComponentServers {
+			if component.CatalogEntryID != sourceName {
+				continue
+			}
+			dependencies = append(dependencies, types.MCPCompositeDeletionDependency{
+				Name:           runtimeComposite.Spec.Manifest.Name,
+				Icon:           runtimeComposite.Spec.Manifest.Icon,
+				MCPServerID:    runtimeComposite.Name,
+				CatalogEntryID: runtimeComposite.Spec.MCPServerCatalogEntryName,
+				WillBeDeleted:  willDelete[runtimeComposite.Spec.MCPServerCatalogEntryName],
+			})
+			break
+		}
+	}
+
+	slices.SortFunc(dependencies, func(a, b types.MCPCompositeDeletionDependency) int {
+		if byEntry := strings.Compare(a.CatalogEntryID, b.CatalogEntryID); byEntry != 0 {
+			return byEntry
+		}
+		return strings.Compare(a.MCPServerID, b.MCPServerID)
+	})
+	return dependencies, nil
 }
 
 func (h *MCPCatalogHandler) AdminListServersForEntryInCatalog(req api.Context) error {

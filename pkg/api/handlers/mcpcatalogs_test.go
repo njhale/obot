@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,10 +16,145 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+func TestDeleteCatalogEntryCompositeDependencies(t *testing.T) {
+	objects := catalogEntryDeletionObjects()
+	storage := newFakeStorage(t, objects...)
+	req := httptest.NewRequest(http.MethodDelete, "/api/mcp-catalogs/default/entries/source", nil)
+	req.SetPathValue("catalog_id", system.DefaultCatalog)
+	req.SetPathValue("entry_id", "source")
+	recorder := httptest.NewRecorder()
+
+	err := (&MCPCatalogHandler{}).DeleteEntry(api.Context{
+		ResponseWriter: recorder,
+		Request:        req,
+		Storage:        storage,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusConflict, recorder.Code)
+
+	var conflict types.MCPCompositeDeletionConflict
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &conflict))
+	assert.Equal(t, "MCP catalog entry is used by composite catalog entries", conflict.Message)
+	assert.Equal(t, []types.MCPCompositeDeletionDependency{
+		{Name: "Composite", CatalogEntryID: "composite"},
+		{Name: "Runtime Composite", MCPServerID: "runtime-composite", CatalogEntryID: "composite"},
+		{Name: "Single Component", CatalogEntryID: "single-component", WillBeDeleted: true},
+	}, conflict.Dependencies)
+
+	for _, name := range []string{"source", "composite", "single-component"} {
+		var entry v1.MCPServerCatalogEntry
+		require.NoError(t, storage.Get(t.Context(), client.ObjectKey{Namespace: system.DefaultNamespace, Name: name}, &entry))
+	}
+}
+
+func TestForceDeleteCatalogEntryCascadesToCatalogComposites(t *testing.T) {
+	objects := catalogEntryDeletionObjects()
+	storage := newFakeStorage(t, objects...)
+	req := httptest.NewRequest(http.MethodDelete, "/api/mcp-catalogs/default/entries/source?force=true", nil)
+	req.SetPathValue("catalog_id", system.DefaultCatalog)
+	req.SetPathValue("entry_id", "source")
+
+	err := (&MCPCatalogHandler{}).DeleteEntry(api.Context{
+		ResponseWriter: httptest.NewRecorder(),
+		Request:        req,
+		Storage:        storage,
+	})
+	require.NoError(t, err)
+
+	for _, name := range []string{"source", "single-component"} {
+		var entry v1.MCPServerCatalogEntry
+		err := storage.Get(t.Context(), client.ObjectKey{Namespace: system.DefaultNamespace, Name: name}, &entry)
+		assert.True(t, apierrors.IsNotFound(err), "expected %s to be deleted, got %v", name, err)
+	}
+
+	var composite v1.MCPServerCatalogEntry
+	require.NoError(t, storage.Get(t.Context(), client.ObjectKey{Namespace: system.DefaultNamespace, Name: "composite"}, &composite))
+	require.Len(t, composite.Spec.Manifest.CompositeConfig.ComponentServers, 1)
+	assert.Equal(t, "other", composite.Spec.Manifest.CompositeConfig.ComponentServers[0].CatalogEntryID)
+	assert.Empty(t, composite.Spec.Manifest.CompositeConfig.ComponentServers[0].Manifest)
+	assert.Nil(t, composite.Spec.Manifest.ToolPreview)
+
+	// Existing runtimes preserve their snapshots and drift until the user or
+	// admin upgrades the runtime composite.
+	var runtimeComposite v1.MCPServer
+	require.NoError(t, storage.Get(t.Context(), client.ObjectKey{Namespace: system.DefaultNamespace, Name: "runtime-composite"}, &runtimeComposite))
+	require.Len(t, runtimeComposite.Spec.Manifest.CompositeConfig.ComponentServers, 2)
+	assert.Equal(t, "source", runtimeComposite.Spec.Manifest.CompositeConfig.ComponentServers[0].CatalogEntryID)
+}
+
+func catalogEntryDeletionObjects() []client.Object {
+	metadata := func(name string) metav1.ObjectMeta {
+		return metav1.ObjectMeta{Name: name, Namespace: system.DefaultNamespace}
+	}
+	component := func(name string) types.CatalogComponentServer {
+		return types.CatalogComponentServer{
+			CatalogEntryID: name,
+			Manifest:       types.MCPServerCatalogEntryManifest{Name: "stale " + name},
+		}
+	}
+	return []client.Object{
+		&v1.MCPCatalog{ObjectMeta: metadata(system.DefaultCatalog)},
+		&v1.MCPServerCatalogEntry{
+			ObjectMeta: metadata("source"),
+			Spec: v1.MCPServerCatalogEntrySpec{
+				Editable:       true,
+				MCPCatalogName: system.DefaultCatalog,
+				Manifest:       types.MCPServerCatalogEntryManifest{Name: "Source", Runtime: types.RuntimeRemote},
+			},
+		},
+		&v1.MCPServerCatalogEntry{
+			ObjectMeta: metadata("other"),
+			Spec: v1.MCPServerCatalogEntrySpec{
+				Editable:       true,
+				MCPCatalogName: system.DefaultCatalog,
+				Manifest:       types.MCPServerCatalogEntryManifest{Name: "Other", Runtime: types.RuntimeRemote},
+			},
+		},
+		&v1.MCPServerCatalogEntry{
+			ObjectMeta: metadata("composite"),
+			Spec: v1.MCPServerCatalogEntrySpec{
+				MCPCatalogName: system.DefaultCatalog,
+				Manifest: types.MCPServerCatalogEntryManifest{
+					Name:        "Composite",
+					Runtime:     types.RuntimeComposite,
+					ToolPreview: []types.MCPServerTool{{Name: "stale"}},
+					CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+						component("source"), component("other"),
+					}},
+				},
+			},
+		},
+		&v1.MCPServerCatalogEntry{
+			ObjectMeta: metadata("single-component"),
+			Spec: v1.MCPServerCatalogEntrySpec{
+				MCPCatalogName: system.DefaultCatalog,
+				Manifest: types.MCPServerCatalogEntryManifest{
+					Name: "Single Component", Runtime: types.RuntimeComposite,
+					CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{component("source")}},
+				},
+			},
+		},
+		&v1.MCPServer{
+			ObjectMeta: metadata("runtime-composite"),
+			Spec: v1.MCPServerSpec{
+				MCPServerCatalogEntryName: "composite",
+				Manifest: types.MCPServerManifest{
+					Name: "Runtime Composite", Runtime: types.RuntimeComposite,
+					CompositeConfig: &types.CompositeRuntimeConfig{ComponentServers: []types.ComponentServer{
+						{CatalogEntryID: "source", Manifest: types.MCPServerManifest{Name: "Source snapshot", Runtime: types.RuntimeRemote}},
+						{CatalogEntryID: "other", Manifest: types.MCPServerManifest{Name: "Other snapshot", Runtime: types.RuntimeRemote}},
+					}},
+				},
+			},
+		},
+	}
+}
 
 func TestAcceptCatalogEntryOwnership(t *testing.T) {
 	entry := &v1.MCPServerCatalogEntry{

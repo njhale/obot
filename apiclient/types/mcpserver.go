@@ -279,6 +279,21 @@ type MCPEnv struct {
 
 type MCPServerCatalogEntryList List[MCPServerCatalogEntry]
 
+// MCPCompositeDeletionDependency describes a catalog or runtime composite
+// affected by deleting one of its sources.
+type MCPCompositeDeletionDependency struct {
+	Name           string `json:"name"`
+	Icon           string `json:"icon,omitempty"`
+	MCPServerID    string `json:"mcpServerID,omitempty"`
+	CatalogEntryID string `json:"catalogEntryID"`
+	WillBeDeleted  bool   `json:"willBeDeleted,omitempty"`
+}
+
+type MCPCompositeDeletionConflict struct {
+	Message      string                           `json:"message"`
+	Dependencies []MCPCompositeDeletionDependency `json:"dependencies"`
+}
+
 type MCPServerManifest struct {
 	Metadata         map[string]string `json:"metadata,omitempty"`
 	Name             string            `json:"name"`

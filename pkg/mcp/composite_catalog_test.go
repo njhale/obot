@@ -8,7 +8,9 @@ import (
 	storagescheme "github.com/obot-platform/obot/pkg/storage/scheme"
 	"github.com/obot-platform/obot/pkg/system"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -156,4 +158,50 @@ func TestCompositeValidatorValidatesRefsOnlyStructure(t *testing.T) {
 
 	manifest.CompositeConfig.ComponentServers[0].MCPServerID = "server"
 	require.Error(t, (CompositeValidator{}).ValidateCatalogStructure(t.Context(), manifest))
+}
+
+func TestRemoveCatalogEntryFromCompositesUpdatesAndDeletesDependents(t *testing.T) {
+	retained := &v1.MCPServerCatalogEntry{
+		ObjectMeta: metav1.ObjectMeta{Name: "retained-composite", Namespace: system.DefaultNamespace},
+		Spec: v1.MCPServerCatalogEntrySpec{
+			MCPCatalogName: system.DefaultCatalog,
+			Manifest: types.MCPServerCatalogEntryManifest{
+				Runtime:     types.RuntimeComposite,
+				ToolPreview: []types.MCPServerTool{{Name: "stale"}},
+				CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+					{CatalogEntryID: "source", Manifest: types.MCPServerCatalogEntryManifest{Name: "snapshot"}},
+					{CatalogEntryID: "other", Manifest: types.MCPServerCatalogEntryManifest{Name: "other snapshot"}},
+				}},
+			},
+		},
+	}
+	deleted := &v1.MCPServerCatalogEntry{
+		ObjectMeta: metav1.ObjectMeta{Name: "deleted-composite", Namespace: system.DefaultNamespace},
+		Spec: v1.MCPServerCatalogEntrySpec{
+			MCPCatalogName: system.DefaultCatalog,
+			Manifest: types.MCPServerCatalogEntryManifest{
+				Runtime: types.RuntimeComposite,
+				CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+					{CatalogEntryID: "source"},
+				}},
+			},
+		},
+	}
+	client := fake.NewClientBuilder().WithScheme(storagescheme.Scheme).WithObjects(retained, deleted).Build()
+
+	references, err := ListCompositeCatalogReferences(t.Context(), client, "source")
+	require.NoError(t, err)
+	require.Len(t, references, 2)
+	require.NoError(t, RemoveCatalogEntryFromComposites(t.Context(), client, "source"))
+
+	var updated v1.MCPServerCatalogEntry
+	require.NoError(t, client.Get(t.Context(), kclient.ObjectKey{Namespace: system.DefaultNamespace, Name: retained.Name}, &updated))
+	require.Len(t, updated.Spec.Manifest.CompositeConfig.ComponentServers, 1)
+	require.Equal(t, "other", updated.Spec.Manifest.CompositeConfig.ComponentServers[0].CatalogEntryID)
+	require.Empty(t, updated.Spec.Manifest.CompositeConfig.ComponentServers[0].Manifest)
+	require.Empty(t, updated.Spec.Manifest.ToolPreview)
+
+	err = client.Get(t.Context(), kclient.ObjectKey{Namespace: system.DefaultNamespace, Name: deleted.Name}, &updated)
+	require.True(t, apierrors.IsNotFound(err))
+	require.NoError(t, RemoveCatalogEntryFromComposites(t.Context(), client, "source"))
 }

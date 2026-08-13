@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 
 	"github.com/obot-platform/obot/apiclient/types"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/util/retry"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -165,4 +168,93 @@ func StripCatalogComponentManifests(manifest *types.MCPServerCatalogEntryManifes
 		}
 	}
 	return changed
+}
+
+// CompositeCatalogReference describes a stored catalog composite that refers
+// to a source catalog entry.
+type CompositeCatalogReference struct {
+	Entry         v1.MCPServerCatalogEntry
+	WillBeDeleted bool
+}
+
+// ListCompositeCatalogReferences finds default-catalog composites that refer
+// to sourceName. Catalog composites persist references, so no resolution is
+// needed for this integrity check.
+func ListCompositeCatalogReferences(ctx context.Context, reader kclient.Reader, sourceName string) ([]CompositeCatalogReference, error) {
+	var entries v1.MCPServerCatalogEntryList
+	if err := reader.List(ctx, &entries, kclient.InNamespace(system.DefaultNamespace)); err != nil {
+		return nil, fmt.Errorf("list composite catalog entries: %w", err)
+	}
+
+	var references []CompositeCatalogReference
+	for _, entry := range entries.Items {
+		if entry.Spec.MCPCatalogName != system.DefaultCatalog ||
+			entry.Spec.PowerUserWorkspaceID != "" ||
+			entry.Spec.Manifest.Runtime != types.RuntimeComposite ||
+			entry.Spec.Manifest.CompositeConfig == nil {
+			continue
+		}
+
+		matched := false
+		for _, component := range entry.Spec.Manifest.CompositeConfig.ComponentServers {
+			if component.CatalogEntryID == sourceName {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			references = append(references, CompositeCatalogReference{
+				Entry:         entry,
+				WillBeDeleted: len(entry.Spec.Manifest.CompositeConfig.ComponentServers) == 1,
+			})
+		}
+	}
+	return references, nil
+}
+
+// RemoveCatalogEntryFromComposites removes sourceName from every referencing
+// catalog composite. A composite that would become empty is deleted. The
+// operation is idempotent and retries concurrent updates.
+func RemoveCatalogEntryFromComposites(ctx context.Context, client kclient.Client, sourceName string) error {
+	references, err := ListCompositeCatalogReferences(ctx, client, sourceName)
+	if err != nil {
+		return err
+	}
+
+	for _, reference := range references {
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			var entry v1.MCPServerCatalogEntry
+			if err := client.Get(ctx, kclient.ObjectKey{
+				Namespace: system.DefaultNamespace,
+				Name:      reference.Entry.Name,
+			}, &entry); apierrors.IsNotFound(err) {
+				return nil
+			} else if err != nil {
+				return err
+			}
+
+			config := entry.Spec.Manifest.CompositeConfig
+			if config == nil {
+				return nil
+			}
+			before := len(config.ComponentServers)
+			config.ComponentServers = slices.DeleteFunc(config.ComponentServers, func(component types.CatalogComponentServer) bool {
+				return component.CatalogEntryID == sourceName
+			})
+			if len(config.ComponentServers) == before {
+				return nil
+			}
+
+			entry.Spec.Manifest.ToolPreview = nil
+			StripCatalogComponentManifests(&entry.Spec.Manifest)
+			if len(config.ComponentServers) == 0 {
+				return kclient.IgnoreNotFound(client.Delete(ctx, &entry))
+			}
+			return client.Update(ctx, &entry)
+		}); err != nil {
+			return fmt.Errorf("remove catalog entry %q from composite %q: %w", sourceName, reference.Entry.Name, err)
+		}
+	}
+
+	return nil
 }
