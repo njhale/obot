@@ -106,7 +106,8 @@ type CatalogComponentServer struct {
 	CatalogEntryID string `json:"catalogEntryID,omitempty"`
 	// MCPServerID if set, reference the multi-user MCP server the component server proxies to
 	MCPServerID string `json:"mcpServerID,omitempty"`
-	// Manifest is the catalog entry manifest of the component server
+	// Manifest is resolved from CatalogEntryID or MCPServerID for API responses.
+	// Deprecated: ignored on input and never persisted.
 	Manifest MCPServerCatalogEntryManifest `json:"manifest,omitzero"`
 	// ToolOverrides restrict the tools exposed by the component server
 	ToolOverrides []ToolOverride `json:"toolOverrides,omitempty"`

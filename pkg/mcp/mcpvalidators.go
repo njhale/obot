@@ -874,7 +874,39 @@ func (v CompositeValidator) ValidateConfig(_ context.Context, manifest types.MCP
 	return nil
 }
 
-func (v CompositeValidator) ValidateCatalogConfig(_ context.Context, manifest types.MCPServerCatalogEntryManifest) error {
+// ValidateCatalogConfig validates a resolved catalog composite. Callers that
+// only have the persisted refs-only form must use ValidateCatalogStructure,
+// resolve its sources, and then call ValidateCatalogConfig on the result.
+func (v CompositeValidator) ValidateCatalogConfig(ctx context.Context, manifest types.MCPServerCatalogEntryManifest) error {
+	if err := v.ValidateCatalogStructure(ctx, manifest); err != nil {
+		return err
+	}
+
+	for i, component := range manifest.CompositeConfig.ComponentServers {
+		if component.CatalogEntryID != "" && component.Manifest.ServerUserType == types.ServerUserTypeMultiUser {
+			return types.RuntimeValidationError{
+				Runtime: types.RuntimeComposite,
+				Field:   fmt.Sprintf("compositeConfig.componentServers[%d]", i),
+				Message: "multi-user catalog entries cannot be included in a composite server; use the multi-user MCP server instead",
+			}
+		}
+
+		if component.Manifest.Runtime == types.RuntimeComposite {
+			return types.RuntimeValidationError{
+				Runtime: types.RuntimeComposite,
+				Field:   fmt.Sprintf("compositeConfig.componentServers[%d].manifest.runtime", i),
+				Message: "runtime cannot be composite",
+			}
+		}
+	}
+
+	return nil
+}
+
+// ValidateCatalogStructure validates the references and composition policy
+// that are persisted for a catalog composite. It does not inspect component
+// manifests because those are resolved live.
+func (v CompositeValidator) ValidateCatalogStructure(_ context.Context, manifest types.MCPServerCatalogEntryManifest) error {
 	if manifest.Runtime != types.RuntimeComposite {
 		return types.RuntimeValidationError{
 			Runtime: manifest.Runtime,
@@ -913,23 +945,6 @@ func (v CompositeValidator) ValidateCatalogConfig(_ context.Context, manifest ty
 				Runtime: types.RuntimeComposite,
 				Field:   fmt.Sprintf("compositeConfig.componentServers[%d]", i),
 				Message: "must have one of catalogEntryID or mcpServerID set",
-			}
-		}
-
-		if hasCatalogEntry && component.Manifest.ServerUserType == types.ServerUserTypeMultiUser {
-			return types.RuntimeValidationError{
-				Runtime: types.RuntimeComposite,
-				Field:   fmt.Sprintf("compositeConfig.componentServers[%d]", i),
-				Message: "multi-user catalog entries cannot be included in a composite server; use the multi-user MCP server instead",
-			}
-		}
-
-		// Prevent composite MCP servers from being nested
-		if component.Manifest.Runtime == types.RuntimeComposite {
-			return types.RuntimeValidationError{
-				Runtime: types.RuntimeComposite,
-				Field:   fmt.Sprintf("compositeConfig.componentServers[%d].manifest.runtime", i),
-				Message: "runtime cannot be composite",
 			}
 		}
 
