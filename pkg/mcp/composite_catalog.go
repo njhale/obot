@@ -88,7 +88,7 @@ func (r *CompositeCatalogResolver) resolveComponent(ctx context.Context, compone
 		if entry.Spec.MCPCatalogName != system.DefaultCatalog || entry.Spec.PowerUserWorkspaceID != "" {
 			return fmt.Errorf("catalog entry %q does not belong to the default catalog", component.CatalogEntryID)
 		}
-		if !entry.Spec.Manifest.ServerUserType.IsSingleUser() {
+		if entry.Spec.Manifest.ServerUserType == types.ServerUserTypeMultiUser {
 			return fmt.Errorf("multi-user catalog entry %q cannot be included in a composite; use its MCP server instead", component.CatalogEntryID)
 		}
 		if entry.Spec.Manifest.Runtime == types.RuntimeComposite {
