@@ -150,7 +150,9 @@ compositeConfig:
     - catalogEntryID: github.com/company/mcp-catalog::gmail
 ```
 
-During sync, Obot resolves portable keys to internal generated catalog entry IDs and stores the internal IDs. If `catalogEntryID` does not contain `::` and does not match an `entryKey` in the same source, Obot treats it as an internal catalog entry ID and leaves it unchanged.
+During sync, Obot resolves portable keys to internal generated catalog entry IDs and stores only the source references, tool overrides, and tool prefixes. Component manifests are resolved live from the default catalog when the composite is read, previewed, or launched. If `catalogEntryID` does not contain `::` and does not match an `entryKey` in the same source, Obot treats it as an internal catalog entry ID; that ID must resolve to a current entry in the default catalog.
+
+Launching a composite creates runtime component snapshots. Those runtime snapshots intentionally drift from their source entries until a user or administrator upgrades the runtime composite. Updating a source entry therefore changes the catalog composite immediately, but does not silently change an already-running composite.
 
 #### Composite configuration fields
 

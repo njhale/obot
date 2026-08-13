@@ -8,12 +8,11 @@ import (
 	"github.com/obot-platform/nah/pkg/router"
 	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/logger"
-	"github.com/obot-platform/obot/pkg/controller/handlers/mcpserver"
 	gclient "github.com/obot-platform/obot/pkg/gateway/client"
+	"github.com/obot-platform/obot/pkg/mcp"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	"github.com/obot-platform/obot/pkg/utils"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -137,112 +136,40 @@ func (*Handler) UpdateSystemManifestHashAndLastUpdated(req router.Request, _ rou
 	return nil
 }
 
-// DetectCompositeDrift detects when a composite catalog entry's component snapshots have drifted
-// from their source catalog entries or multi-user servers
-func (h *Handler) DetectCompositeDrift(req router.Request, _ router.Response) error {
+// MigrateCompositeCatalogStorage removes legacy source snapshots from catalog
+// composites. Nested components created before validation existed are pruned
+// using their legacy snapshot before the remaining snapshots are discarded.
+func (*Handler) MigrateCompositeCatalogStorage(req router.Request, _ router.Response) error {
 	entry := req.Object.(*v1.MCPServerCatalogEntry)
-
-	if entry.Spec.Manifest.Runtime != types.RuntimeComposite {
-		if entry.Status.NeedsUpdate {
-			entry.Status.NeedsUpdate = false
-			return req.Client.Status().Update(req.Ctx, entry)
-		}
+	manifest := &entry.Spec.Manifest
+	if manifest.Runtime != types.RuntimeComposite || manifest.CompositeConfig == nil {
 		return nil
 	}
 
-	// Check each component for drift
-	var drifted bool
-	for _, component := range entry.Spec.Manifest.CompositeConfig.ComponentServers {
-		// Handle multi-user component drift
-		if component.MCPServerID != "" {
-			var server v1.MCPServer
-			if err := req.Get(&server, entry.Namespace, component.MCPServerID); err != nil {
-				if apierrors.IsNotFound(err) {
-					drifted = true
-					break
-				}
-				return fmt.Errorf("failed to get multi-user server %s: %w", component.MCPServerID, err)
-			}
-
-			hasDrifted, err := mcpserver.ConfigurationHasDrifted(req.Ctx, h.gatewayClient, &server, component.Manifest, false)
-			if err != nil {
-				return fmt.Errorf("failed to detect drift for multi-user server %s: %w", component.MCPServerID, err)
-			}
-			if hasDrifted {
-				drifted = true
-				break
-			}
-		} else {
-			// Handle catalog entry component drift
-			var componentEntry v1.MCPServerCatalogEntry
-			if err := req.Get(&componentEntry, entry.Namespace, component.CatalogEntryID); err != nil {
-				if apierrors.IsNotFound(err) {
-					drifted = true
-					break
-				}
-				return fmt.Errorf("failed to get component catalog entry %s: %w", component.CatalogEntryID, err)
-			}
-
-			// We added the EntryKey field, but it really shouldn't affect drift detection here.
-			if component.Manifest.EntryKey == "" && componentEntry.Spec.Manifest.EntryKey != "" {
-				component.Manifest.EntryKey = componentEntry.Spec.Manifest.EntryKey
-			}
-
-			// Same for serverUserType
-			if component.Manifest.ServerUserType == "" && componentEntry.Spec.Manifest.ServerUserType != "" {
-				component.Manifest.ServerUserType = componentEntry.Spec.Manifest.ServerUserType
-			}
-
-			var (
-				snapshotHash = utils.Digest(component.Manifest)
-				currentHash  = utils.Digest(componentEntry.Spec.Manifest)
-			)
-			if snapshotHash != currentHash {
-				drifted = true
-				break
-			}
-		}
-	}
-
-	if entry.Status.NeedsUpdate != drifted {
-		log.Infof("MCP catalog entry composite drift status changed: entry=%s needsUpdate=%v", entry.Name, drifted)
-		entry.Status.NeedsUpdate = drifted
-		return req.Client.Status().Update(req.Ctx, entry)
-	}
-
-	return nil
-}
-
-// CleanupNestedCompositeServers removes component servers with composite runtimes from composite catalog entries.
-// This handler cleans up entries that were created before API validation to prevent nested composite servers.
-func (*Handler) CleanupNestedCompositeEntries(req router.Request, _ router.Response) error {
-	var (
-		entry    = req.Object.(*v1.MCPServerCatalogEntry)
-		manifest = entry.Spec.Manifest
-	)
-
-	if manifest.Runtime != types.RuntimeComposite ||
-		manifest.CompositeConfig == nil {
-		return nil
-	}
-
-	// Remove all composite components from the server's manifest
-	var (
-		components    = manifest.CompositeConfig.ComponentServers
-		numComponents = len(components)
-	)
-	components = slices.DeleteFunc(components, func(component types.CatalogComponentServer) bool {
+	components := manifest.CompositeConfig.ComponentServers
+	before := len(components)
+	manifest.CompositeConfig.ComponentServers = slices.DeleteFunc(components, func(component types.CatalogComponentServer) bool {
 		return component.Manifest.Runtime == types.RuntimeComposite
 	})
-
-	if numComponents == len(components) {
-		// No components were removed, so no need to update the manifest.
+	changed := before != len(manifest.CompositeConfig.ComponentServers)
+	changed = mcp.StripCatalogComponentManifests(manifest) || changed
+	if !changed {
 		return nil
 	}
 
-	entry.Spec.Manifest.CompositeConfig.ComponentServers = components
-	log.Infof("Pruned nested composite components from MCP catalog entry: entry=%s removedComponents=%d", entry.Name, numComponents-len(components))
+	log.Infof("Migrated MCP catalog composite to refs-only storage: entry=%s removedNestedComponents=%d", entry.Name, before-len(manifest.CompositeConfig.ComponentServers))
 	return kclient.IgnoreNotFound(req.Client.Update(req.Ctx, entry))
+}
+
+// ClearCompositeCatalogNeedsUpdate removes the obsolete catalog-snapshot drift
+// status. Runtime MCPServer drift remains authoritative and user-controlled.
+func (*Handler) ClearCompositeCatalogNeedsUpdate(req router.Request, _ router.Response) error {
+	entry := req.Object.(*v1.MCPServerCatalogEntry)
+	if !entry.Status.NeedsUpdate {
+		return nil
+	}
+	entry.Status.NeedsUpdate = false
+	return kclient.IgnoreNotFound(req.Client.Status().Update(req.Ctx, entry))
 }
 
 // CleanupUnusedOAuthCredentials removes OAuth credentials for remote catalog entries

@@ -117,6 +117,9 @@ func (r *CompositeCatalogResolver) resolveComponent(ctx context.Context, compone
 		return nil
 	}
 
+	if r.reader == nil {
+		return fmt.Errorf("get MCP server %q: no catalog reader configured", component.MCPServerID)
+	}
 	var server v1.MCPServer
 	if err := r.reader.Get(ctx, kclient.ObjectKey{
 		Namespace: system.DefaultNamespace,
@@ -139,6 +142,9 @@ func (r *CompositeCatalogResolver) resolveComponent(ctx context.Context, compone
 func (r *CompositeCatalogResolver) getCatalogEntry(ctx context.Context, name string) (v1.MCPServerCatalogEntry, error) {
 	if entry, ok := r.catalogEntries[name]; ok {
 		return *entry.DeepCopy(), nil
+	}
+	if r.reader == nil {
+		return v1.MCPServerCatalogEntry{}, fmt.Errorf("get catalog entry %q: no catalog reader configured", name)
 	}
 
 	var entry v1.MCPServerCatalogEntry

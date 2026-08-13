@@ -156,7 +156,7 @@ func (h *Handler) Sync(req router.Request, resp router.Response) error {
 		addSyncError(mcpCatalog.Status.SyncErrors, sourceURL, errMsg)
 	}
 
-	toAdd, compositeRefErrors := h.resolveCompositeSourceRefs(req.Ctx, req.Client, mcpCatalog.Namespace, mcpCatalog.Name, toAdd, validationOptions)
+	toAdd, compositeRefErrors := h.resolveCompositeSourceRefsForSources(req.Ctx, req.Client, mcpCatalog.Namespace, mcpCatalog.Name, mcpCatalog.Spec.SourceURLs, toAdd, validationOptions)
 	for sourceURL, errMsg := range compositeRefErrors {
 		addSyncError(mcpCatalog.Status.SyncErrors, sourceURL, errMsg)
 	}
@@ -283,6 +283,9 @@ func reconcileRemovedEntries(ctx context.Context, c client.Client, catalog *v1.M
 		}
 
 		if _, configured := configuredSources[mcp.SourceIDForURL(entry.Spec.SourceURL)]; !configured {
+			if err := mcp.RemoveCatalogEntryFromComposites(ctx, c, entry.Name); err != nil {
+				return fmt.Errorf("failed to remove catalog entry %q from composites: %w", entry.Name, err)
+			}
 			if err := c.Delete(ctx, entry); err != nil && !apierrors.IsNotFound(err) {
 				return fmt.Errorf("failed to delete catalog entry %q from removed source: %w", entry.Name, err)
 			}
@@ -311,6 +314,9 @@ func reconcileRemovedEntries(ctx context.Context, c client.Client, catalog *v1.M
 	}
 
 	for entryName := range missingNames {
+		if err := mcp.RemoveCatalogEntryFromComposites(ctx, c, entryName); err != nil {
+			return fmt.Errorf("failed to remove catalog entry %q from composites: %w", entryName, err)
+		}
 		entry := &v1.MCPServerCatalogEntry{ObjectMeta: metav1.ObjectMeta{Name: entryName, Namespace: catalog.Namespace}}
 		if err := c.Delete(ctx, entry); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to delete unused catalog entry %q: %w", entryName, err)
@@ -319,6 +325,9 @@ func reconcileRemovedEntries(ctx context.Context, c client.Client, catalog *v1.M
 	}
 
 	for _, entryName := range referencedNames {
+		if err := mcp.RemoveCatalogEntryFromComposites(ctx, c, entryName); err != nil {
+			return fmt.Errorf("failed to remove catalog entry %q from composites: %w", entryName, err)
+		}
 		if err := detachCatalogEntry(ctx, c, catalog, entryName); err != nil {
 			return fmt.Errorf("failed to detach catalog entry %q: %w", entryName, err)
 		}
@@ -359,9 +368,14 @@ func detachCatalogEntry(ctx context.Context, c client.Client, catalog *v1.MCPCat
 }
 
 // resolveCompositeSourceRefs rewrites GitOps portable component refs to stored
-// catalog entry names and snapshots the target manifests. Entries with invalid
-// portable refs are skipped so bad composites do not get applied.
+// catalog entry names, then resolves source manifests only for validation.
+// Entries with invalid or unresolved refs are skipped so bad composites do not
+// get applied. Persisted catalog composites remain refs-only.
 func (h *Handler) resolveCompositeSourceRefs(ctx context.Context, c client.Client, namespace, catalogName string, objs []client.Object, options ...mcp.ValidationOptions) ([]client.Object, map[string]string) {
+	return h.resolveCompositeSourceRefsForSources(ctx, c, namespace, catalogName, nil, objs, options...)
+}
+
+func (h *Handler) resolveCompositeSourceRefsForSources(ctx context.Context, c client.Client, namespace, catalogName string, activeSourceURLs []string, objs []client.Object, options ...mcp.ValidationOptions) ([]client.Object, map[string]string) {
 	validationOptions := h.remoteURLValidationConfig
 	if len(options) > 0 {
 		validationOptions = options[0]
@@ -379,39 +393,23 @@ func (h *Handler) resolveCompositeSourceRefs(ctx context.Context, c client.Clien
 		}
 	}
 
-	result := make([]client.Object, 0, len(objs))
 	errsBySourceURL := make(map[string]string)
+	invalidEntries := make(map[string]struct{})
 	for _, obj := range objs {
 		entry, ok := obj.(*v1.MCPServerCatalogEntry)
 		if !ok || entry.Spec.Manifest.Runtime != types.RuntimeComposite || entry.Spec.Manifest.CompositeConfig == nil {
-			result = append(result, obj)
+			continue
+		}
+		if catalogName != system.DefaultCatalog {
+			addSyncError(errsBySourceURL, entry.Spec.SourceURL, fmt.Sprintf("failed to resolve composite catalog entry %q: composites are only supported in the default catalog", entry.Name))
+			invalidEntries[entry.Name] = struct{}{}
 			continue
 		}
 
-		changed := false
 		var errs []error
 		for i := range entry.Spec.Manifest.CompositeConfig.ComponentServers {
 			component := &entry.Spec.Manifest.CompositeConfig.ComponentServers[i]
-			if component.MCPServerID != "" {
-				var server v1.MCPServer
-				if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: component.MCPServerID}, &server); err != nil {
-					errs = append(errs, fmt.Errorf("failed to get multi-user server %q: %w", component.MCPServerID, err))
-					continue
-				}
-				if server.Spec.IsSingleUser() {
-					errs = append(errs, fmt.Errorf("server %q is not a multi-user server", component.MCPServerID))
-					continue
-				}
-				if catalogName != "" && server.Spec.MCPCatalogID != catalogName {
-					errs = append(errs, fmt.Errorf("multi-user server %q not found in catalog %q", component.MCPServerID, catalogName))
-					continue
-				}
-
-				component.Manifest = server.Spec.Manifest.ConvertToCatalogEntry()
-				changed = true
-				continue
-			}
-			if component.CatalogEntryID == "" {
+			if component.MCPServerID != "" || component.CatalogEntryID == "" {
 				continue
 			}
 
@@ -420,45 +418,77 @@ func (h *Handler) resolveCompositeSourceRefs(ctx context.Context, c client.Clien
 				errs = append(errs, err)
 				continue
 			}
-			if target == nil {
-				target = entriesByName[component.CatalogEntryID]
+			if target != nil {
+				component.CatalogEntryID = target.Name
 			}
-			if target == nil && c != nil {
-				var storedEntry v1.MCPServerCatalogEntry
-				if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: component.CatalogEntryID}, &storedEntry); err != nil && !apierrors.IsNotFound(err) {
-					errs = append(errs, fmt.Errorf("failed to get component catalog entry %q: %w", component.CatalogEntryID, err))
-					continue
-				} else if err == nil {
-					if catalogName != "" && storedEntry.Spec.MCPCatalogName != catalogName {
-						errs = append(errs, fmt.Errorf("component catalog entry %q not found in catalog %q", component.CatalogEntryID, catalogName))
-						continue
-					}
-					target = &storedEntry
-				}
-			}
-			if target == nil {
-				continue
-			}
-
-			component.CatalogEntryID = target.Name
-			component.Manifest = target.Spec.Manifest
-			changed = true
 		}
+		mcp.StripCatalogComponentManifests(&entry.Spec.Manifest)
 
 		if len(errs) > 0 {
 			addSyncError(errsBySourceURL, entry.Spec.SourceURL, fmt.Sprintf("failed to resolve composite catalog entry %q: %v", entry.Name, errors.Join(errs...)))
+			invalidEntries[entry.Name] = struct{}{}
 			continue
 		}
+	}
 
-		if changed {
-			if err := catalogvalidation.ValidateManifest(ctx, entry.Spec.Manifest, catalogvalidation.ValidationOptions{
-				MCP:        validationOptions,
-				MCPBackend: h.mcpBackend,
-				GitManaged: entry.IsGitManaged(),
-			}); err != nil {
+	desiredEntries := make(map[string]v1.MCPServerCatalogEntry, len(entriesByName))
+	for name, entry := range entriesByName {
+		if _, invalid := invalidEntries[name]; !invalid {
+			desiredEntries[name] = *entry.DeepCopy()
+		}
+	}
+	resolver := mcp.NewCompositeCatalogResolver(c).WithCatalogEntries(desiredEntries)
+	activeSourceIDs := make(map[string]struct{}, len(activeSourceURLs))
+	for _, sourceURL := range activeSourceURLs {
+		activeSourceIDs[mcp.SourceIDForURL(sourceURL)] = struct{}{}
+	}
+	result := make([]client.Object, 0, len(objs))
+	for _, obj := range objs {
+		entry, ok := obj.(*v1.MCPServerCatalogEntry)
+		if !ok || entry.Spec.Manifest.Runtime != types.RuntimeComposite {
+			result = append(result, obj)
+			continue
+		}
+		if _, invalid := invalidEntries[entry.Name]; invalid {
+			continue
+		}
+		if activeSourceURLs != nil {
+			var err error
+			for _, component := range entry.Spec.Manifest.CompositeConfig.ComponentServers {
+				if component.CatalogEntryID == "" {
+					continue
+				}
+				if _, desired := desiredEntries[component.CatalogEntryID]; desired {
+					continue
+				}
+				var stored v1.MCPServerCatalogEntry
+				if getErr := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: component.CatalogEntryID}, &stored); getErr != nil {
+					continue
+				}
+				if stored.IsGitManaged() {
+					if _, active := activeSourceIDs[mcp.SourceIDForURL(stored.Spec.SourceURL)]; !active {
+						err = fmt.Errorf("catalog entry %q belongs to a removed catalog source", component.CatalogEntryID)
+						break
+					}
+				}
+			}
+			if err != nil {
 				addSyncError(errsBySourceURL, entry.Spec.SourceURL, fmt.Sprintf("failed to validate resolved composite catalog entry %q: %v", entry.Name, err))
 				continue
 			}
+		}
+
+		resolved, err := resolver.Resolve(ctx, entry.Spec.Manifest)
+		if err == nil {
+			err = catalogvalidation.ValidateManifest(ctx, resolved, catalogvalidation.ValidationOptions{
+				MCP:        validationOptions,
+				MCPBackend: h.mcpBackend,
+				GitManaged: entry.IsGitManaged(),
+			})
+		}
+		if err != nil {
+			addSyncError(errsBySourceURL, entry.Spec.SourceURL, fmt.Sprintf("failed to validate resolved composite catalog entry %q: %v", entry.Name, err))
+			continue
 		}
 
 		result = append(result, obj)

@@ -9,6 +9,7 @@ import (
 	"github.com/obot-platform/obot/apiclient/types"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/storage/scheme"
+	"github.com/obot-platform/obot/pkg/system"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -69,6 +70,42 @@ func TestUnreferencedRemovedEntryIsDeleted(t *testing.T) {
 	var deleted v1.MCPServerCatalogEntry
 	err := c.Get(t.Context(), client.ObjectKeyFromObject(entry), &deleted)
 	require.True(t, apierrors.IsNotFound(err))
+}
+
+func TestRemovedEntryIsDroppedFromCatalogComposite(t *testing.T) {
+	catalog := testCatalog()
+	source := managedCatalogEntry(t, catalog, "default-source-12345678")
+	other := &v1.MCPServerCatalogEntry{
+		ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: catalog.Namespace},
+		Spec: v1.MCPServerCatalogEntrySpec{
+			Editable: true, MCPCatalogName: system.DefaultCatalog,
+			Manifest: types.MCPServerCatalogEntryManifest{Name: "Other", Runtime: types.RuntimeRemote},
+		},
+	}
+	composite := &v1.MCPServerCatalogEntry{
+		ObjectMeta: metav1.ObjectMeta{Name: "composite", Namespace: catalog.Namespace},
+		Spec: v1.MCPServerCatalogEntrySpec{
+			Editable: true, MCPCatalogName: system.DefaultCatalog,
+			Manifest: types.MCPServerCatalogEntryManifest{
+				Name: "Composite", Runtime: types.RuntimeComposite,
+				CompositeConfig: &types.CompositeCatalogConfig{ComponentServers: []types.CatalogComponentServer{
+					{CatalogEntryID: source.Name}, {CatalogEntryID: other.Name},
+				}},
+			},
+		},
+	}
+	c := newCatalogFakeClient(source, other, composite)
+
+	require.NoError(t, reconcileRemovedEntries(t.Context(), c, catalog, nil))
+
+	var deleted v1.MCPServerCatalogEntry
+	err := c.Get(t.Context(), client.ObjectKeyFromObject(source), &deleted)
+	require.True(t, apierrors.IsNotFound(err))
+
+	var updated v1.MCPServerCatalogEntry
+	require.NoError(t, c.Get(t.Context(), client.ObjectKeyFromObject(composite), &updated))
+	require.Len(t, updated.Spec.Manifest.CompositeConfig.ComponentServers, 1)
+	assert.Equal(t, other.Name, updated.Spec.Manifest.CompositeConfig.ComponentServers[0].CatalogEntryID)
 }
 
 func TestEntriesFromRemovedSourceAreDeleted(t *testing.T) {

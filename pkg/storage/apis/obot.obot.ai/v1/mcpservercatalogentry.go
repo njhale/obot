@@ -95,7 +95,8 @@ type MCPServerCatalogEntryStatus struct {
 	ToolPreviewsLastGenerated *metav1.Time `json:"toolPreviewsLastGenerated,omitempty"`
 	// ManifestHash is a SHA256 hash of the catalog entry configuration used to detect changes.
 	ManifestHash string `json:"manifestHash,omitempty"`
-	// NeedsUpdate indicates whether this composite catalog entry's component snapshots have drifted from their sources.
+	// NeedsUpdate is retained for backward-compatible API decoding. Catalog
+	// composites no longer snapshot source manifests, so controllers clear it.
 	NeedsUpdate bool `json:"needsUpdate,omitempty"`
 	// OAuthCredentialConfigured indicates whether OAuth credentials have been configured for this remote catalog entry.
 	// Only relevant when Runtime is "remote" and RemoteConfig.StaticOAuthRequired is true.
