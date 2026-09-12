@@ -2,7 +2,7 @@
 
 Authentication providers allow your Obot installation to authenticate users with the identity provider of your choice.
 Administrators must configure at least one authentication provider before users can log in.
-Multiple providers can be configured and available for login at the same time.
+Only one provider can be configured at a time. To change providers, see [Switching Between Auth Providers](#switching-between-auth-providers).
 
 :::note
 In order for authentication to be enabled, the Obot server must be run with the environment variable set:
@@ -315,82 +315,59 @@ If your Auth0 tenant supports [Organizations](https://auth0.com/docs/manage-user
 
 This section describes the steps involved in switching authentication providers in Obot. In this example, the provider is switched from **GitHub** to **Microsoft Entra**.
 
+Obot serves logins from one configured auth provider at a time. Switching stages the replacement provider's settings while the current provider keeps serving logins, has you prove the replacement works by signing in through it, and then makes the replacement the only way to sign in. If any step fails, the current provider stays configured and you can try again.
+
 ### Prerequisites
 
 - Authentication is already enabled.
 - GitHub is configured as the active authentication provider.
-- An initial **Owner** user is already set up.
+- You are logged in as an **Owner**. Only owners can switch auth providers; administrators are not offered the option.
+- Your license includes the enterprise auth providers (see [Obot Editions](../enterprise/overview.md)). Without one, the Entra card shows **Registration Required** and clicking **Configure** prompts you to register instead of starting the switch.
 
-### Step 1: Verify Bootstrap Login is Enabled
+### Step 1: Configure Microsoft Entra as the Replacement
 
-Ensure the following environment variable is set in your Obot installation:
-
-`OBOT_SERVER_FORCE_ENABLE_BOOTSTRAP=true`
-
-### Step 2: Deconfigure the Existing Auth Provider (GitHub)
-
-1. Log in to the admin console (`<obot-server>/admin`).
-2. Use the **Sign in with Bootstrap Token** option.
-
-![screenshot of login with bootstrap and github](/img/login_bootstrap_and_github.png)
-
-3. Enter the **Bootstrap Token** and click **Login**.
-4. Navigate to **User Management → Auth Providers**.
-5. In the configured provider (GitHub in this case), click **Deconfigure Provider**.
-
-![screenshot of deconfigure authprovider option](/img/deconfigure_authprovider.png)
-
-6. When prompted for confirmation, click **Yes, I'm sure**.
-
-![screenshot of deconfigure authprovider confirmation](/img/deconfigure_authprovider_confirmation.png)
-
-7. After deconfiguration, you are redirected to the **Welcome to Obot!** page.
-
-![screenshot of welcome obot](/img/welcome_obot_bootstrap.png)
-
-### Step 3: Configure Microsoft Entra as the New Auth Provider
-
-1. On the **Welcome to Obot!** page, click **Get Started**.
-2. You are redirected to the **Auth Providers** page.
-3. Locate **Microsoft Entra** and click **Configure**.
-
-![screenshot of setup entra](/img/setup_entra.png)
-
+1. Log in to Obot (`<obot-server>`).
+2. Navigate to **Identity & Access** and select the **Auth Providers** tab.
+3. Locate **Microsoft Entra** and click **Configure**. A **Switch to Microsoft Entra** dialog opens with three steps: **Configure**, **Sign in**, and **Switch**.
 4. Follow the documentation to create and configure the Entra application from [Entra Instructions](#entra-enterprise-only).
 5. Enter the required details:
 - Client ID
 - Client Secret
 - Tenant ID
-6. Click **Confirm**.
-7. Log out.
+6. Click **Continue**.
 
-### Step 4: Log In Using Microsoft Entra
+The settings are saved and the Entra card shows **Staged**. GitHub is still the configured provider, and users continue to log in with GitHub until the switch is complete.
 
-1. Log in to the Obot server (`<obot-server>`).
+:::note
+Only one replacement provider can be staged at a time. While a switch is in progress, the other providers cannot be configured. From the **Sign in** or **Switch** step, click **Unstage** to cancel the switch and remove the staged settings.
+:::
+
+### Step 2: Sign In Using Microsoft Entra
+
+1. Click **Sign in with Microsoft Entra**.
 2. Authenticate using your Microsoft Entra credentials.
-3. After successful authentication, a user with the default role is created.
-4. Log out.
+3. You are returned to the **Auth Providers** page, signed in as the Entra account, and the dialog reopens on the **Switch** step, showing the email address you signed in with as **Verified**.
 
-### Step 5: Promote the Entra User to Owner
-1. Log in to the admin console (`<obot-server>/admin`).
-2. Click **Sign in with Bootstrap Token**.
+The account you sign in with is granted the **Owner** role and will own Obot after the switch. The Entra session lasts for 15 minutes from the time you clicked **Sign in with Microsoft Entra**. After that, you are signed out and must log in again with GitHub to finish the switch; the verification is kept, so you do not need to sign in with Entra again. To use a different account, click **Sign in again**. If the sign-in fails, click **Back** to correct the Entra settings and try again.
 
-![screenshot of login with bootstrap and entra](/img/login_bootstrap_and_entra.png)
+:::tip
+You can close the dialog and return to this step later. The Entra card shows **Staged**, and the dialog reopens automatically the next time an owner visits the **Auth Providers** tab, or when you click **Resume switch**. Each sign-in must be completed within 15 minutes of clicking **Sign in with Microsoft Entra**.
+:::
 
-3. Authenticate using the Bootstrap token.
-4. Navigate to **User Management → Users**.
-5. Locate the Entra user account created in the previous step.
-6. Click **Update Role** and change the role to **Owner**.
-7. Log out.
+### Step 3: Complete the Switch
 
-### Step 6: Final Verification
-1. Log in to the Obot server (`<obot-server>`).
-2. Click **Continue with Microsoft Entra**.
-3. Sign in using the Entra user account that was promoted to Owner in Step 5.
-4. You should now be logged in successfully as an **Owner**.
+1. Click **Switch to Microsoft Entra**.
+2. Entra becomes the configured provider and GitHub is deconfigured in a single operation.
+
+After the switch, Microsoft Entra is the only way to sign in. All GitHub sessions end, including your own if you completed the switch while signed in with GitHub, and users must log in again with Entra. Obot also cleans up GitHub's group data in the background; GitHub cannot be configured again until that finishes.
 
 :::note
 User identities are scoped to the authentication provider used during login.
 If a user previously authenticated using GitHub later signs in using Entra with the same email address, Obot creates a new user record.
-As a result, multiple user accounts with the same email address may exist when authentication providers are switched.
+As a result, multiple user accounts with the same email address may exist when authentication providers are switched, and anything the GitHub users set up stays with their GitHub accounts.
+The exception is switching **to** GitHub or Google: because those providers verify email addresses, an existing user with the same email is reused instead of duplicated.
+:::
+
+:::note
+Switching to **Local** follows the same steps, except that the first step is the Local provider's own dialog, where you set the allowed email domains and create at least one local user. The sign-in step opens when you close that dialog. If you close it before creating a user, the switch dialog reopens at the sign-in step; click **Back** to return to the Local dialog.
 :::
